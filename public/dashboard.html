@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>Dashboard — CineMind AI</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%23E50914'/><text y='72' x='50' text-anchor='middle' font-size='60' fill='white'>🎬</text></svg>">
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body>
+
+<div class="dashboard-layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <a href="/">
+        <div class="logo">
+          <div class="logo-icon">🎬</div>
+          <span class="logo-text">Cine<span style="color:var(--red)">Mind</span></span>
+        </div>
+      </a>
+    </div>
+    <div class="sidebar-divider"></div>
+
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Discover</div>
+      <button class="nav-item active" data-section="home">
+        <span class="nav-icon">🏠</span> Home
+      </button>
+      <button class="nav-item" data-section="recommendations">
+        <span class="nav-icon">✦</span> Recommendations
+      </button>
+      <button class="nav-item" data-section="search">
+        <span class="nav-icon">🔍</span> Movie Search
+      </button>
+      <button class="nav-item" data-section="trending">
+        <span class="nav-icon">🔥</span> Trending
+      </button>
+
+      <div class="nav-section-label" style="margin-top:12px">AI Tools</div>
+      <button class="nav-item" data-section="chat">
+        <span class="nav-icon">💬</span> AI Chat
+      </button>
+      <button class="nav-item" data-section="critic">
+        <span class="nav-icon">🎭</span> AI Critic
+      </button>
+      <button class="nav-item" data-section="planner">
+        <span class="nav-icon">🎉</span> Movie Night
+      </button>
+      <button class="nav-item" data-section="compare">
+        <span class="nav-icon">⚡</span> Compare Films
+      </button>
+
+      <div class="nav-section-label" style="margin-top:12px">Library</div>
+      <button class="nav-item" data-section="watchlist">
+        <span class="nav-icon">❤️</span> Watchlist
+      </button>
+      <button class="nav-item" data-section="history">
+        <span class="nav-icon">📋</span> History
+      </button>
+      <button class="nav-item" data-section="profile">
+        <span class="nav-icon">📊</span> Taste Profile
+      </button>
+    </nav>
+
+    <div class="sidebar-bottom">
+      <div class="sidebar-user" role="button" tabindex="0" title="Click to set your name">
+        <div class="user-avatar">G</div>
+        <div class="user-info">
+          <div class="user-name">Guest</div>
+          <div class="user-label">Cinephile</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Sidebar overlay (mobile) -->
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+  <!-- Main Content -->
+  <main class="main-content">
+
+    <!-- Topbar -->
+    <header class="topbar">
+      <span class="topbar-title" id="topbar-title">Home</span>
+      <div class="topbar-actions">
+        <div class="search-bar">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="topbar-search-input" placeholder="Search movies... (Enter)">
+        </div>
+        <a href="/" class="btn btn-ghost btn-sm">← Home</a>
+      </div>
+    </header>
+
+    <!-- ── SECTION: Home ─────────────────────────────────────────────────── -->
+    <div class="section-page active" id="section-home">
+      <div class="section-page-header">
+        <h1 id="home-greeting">Welcome 🎬</h1>
+        <p>What are you in the mood for tonight?</p>
+      </div>
+
+      <div class="quick-actions" style="margin-bottom:var(--space-xl)">
+        <div class="quick-action-card" data-navigate="recommendations">
+          <div class="quick-action-icon">✦</div>
+          <div class="quick-action-title">Get AI Recommendations</div>
+          <div class="quick-action-desc">Tell AI your taste and get personalized picks</div>
+        </div>
+        <div class="quick-action-card" data-navigate="chat">
+          <div class="quick-action-icon">💬</div>
+          <div class="quick-action-title">Chat with AI</div>
+          <div class="quick-action-desc">Ask anything about movies, get instant answers</div>
+        </div>
+        <div class="quick-action-card" data-navigate="critic">
+          <div class="quick-action-icon">🎭</div>
+          <div class="quick-action-title">AI Movie Critic</div>
+          <div class="quick-action-desc">Deep analysis of any film you choose</div>
+        </div>
+        <div class="quick-action-card" data-navigate="planner">
+          <div class="quick-action-icon">🎉</div>
+          <div class="quick-action-title">Movie Night Planner</div>
+          <div class="quick-action-desc">Perfect pick for your group's mood</div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:var(--space-md)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-md)">
+          <h2 class="heading-lg">Trending This Week</h2>
+          <button class="btn btn-ghost btn-sm" data-navigate="trending">See all →</button>
+        </div>
+        <div class="home-trending-grid" id="home-trending">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SECTION: Recommendations ───────────────────────────────────────── -->
+    <div class="section-page" id="section-recommendations">
+      <div class="section-page-header">
+        <h1>AI Recommendations</h1>
+        <p>Tell AI what you love — get movies crafted to your exact taste</p>
+      </div>
+
+      <div class="rec-form" id="rec-form">
+        <div class="rec-form-grid">
+          <div class="input-group">
+            <label class="input-label">Favorite Movies <span class="text-muted">(press Enter to add)</span></label>
+            <div class="tag-input-container" id="fav-movies-input">
+              <input type="text" placeholder="e.g. Interstellar, Parasite...">
+            </div>
+          </div>
+          <div class="input-group">
+            <label class="input-label">Favorite Genres</label>
+            <div class="tag-input-container" id="genre-input">
+              <input type="text" placeholder="e.g. Sci-Fi, Thriller...">
+            </div>
+          </div>
+          <div class="input-group">
+            <label class="input-label">Favorite Directors</label>
+            <div class="tag-input-container" id="director-input">
+              <input type="text" placeholder="e.g. Nolan, Villeneuve...">
+            </div>
+          </div>
+          <div class="input-group">
+            <label class="input-label">Favorite Actors</label>
+            <div class="tag-input-container" id="actor-input">
+              <input type="text" placeholder="e.g. Cillian Murphy...">
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="rec-submit" style="margin-bottom:var(--space-lg)">
+          ✦ Get Recommendations
+        </button>
+
+        <!-- Mood picker -->
+        <div style="border-top:1px solid var(--border);padding-top:var(--space-lg)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-md)">
+            <div>
+              <p class="label text-muted" style="margin-bottom:4px">Or pick a mood</p>
+              <p style="font-size:0.875rem;color:var(--text-secondary)">Skip the form — just tell us how you feel</p>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="mood-submit">🎬 Find by Mood</button>
+          </div>
+          <div class="mood-grid" id="mood-grid">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+
+      <div id="rec-results" class="rec-results">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- ── SECTION: Search ────────────────────────────────────────────────── -->
+    <div class="section-page" id="section-search">
+      <div class="section-page-header">
+        <h1>Movie Search</h1>
+        <p>Search 500,000+ movies powered by TMDB</p>
+      </div>
+      <div class="search-section-bar">
+        <span class="search-icon-large">🔍</span>
+        <input type="text" id="search-input" placeholder="Search for any movie...">
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-md)">
+        <span class="text-muted body-sm" id="search-results-label"></span>
+      </div>
+      <div class="search-grid" id="search-results">
+        <!-- Populated by JS -->
+      </div>
+      <div style="text-align:center;margin-top:var(--space-xl)">
+        <button class="btn btn-secondary hidden" id="search-load-more">Load More</button>
+      </div>
+    </div>
+
+    <!-- ── SECTION: Trending ──────────────────────────────────────────────── -->
+    <div class="section-page" id="section-trending">
+      <div class="section-page-header">
+        <h1>Trending &amp; Top Rated</h1>
+        <p>What the world is watching right now</p>
+      </div>
+
+      <div style="margin-bottom:var(--space-xl)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-lg)">
+          <h2 class="heading-md" id="trending-heading">Trending</h2>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary btn-sm" id="trending-day-btn">Today</button>
+            <button class="btn btn-primary btn-sm" id="trending-week-btn">This Week</button>
+          </div>
+        </div>
+        <div class="genre-chips" id="genre-chips" aria-label="Browse by genre"></div>
+        <div class="search-grid" id="trending-grid">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <div>
+        <h2 class="heading-md" style="margin-bottom:var(--space-lg)">Top Rated of All Time</h2>
+        <div class="search-grid" id="top-rated-grid">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SECTION: AI Chat ───────────────────────────────────────────────── -->
+    <div class="section-page" id="section-chat" style="padding:0;height:calc(100dvh - 65px)">
+      <div class="chat-layout">
+        <div class="topbar" style="position:sticky;top:0;border-radius:0;border-left:none;border-right:none">
+          <span class="topbar-title">💬 AI Movie Assistant</span>
+          <span style="display:flex;align-items:center;gap:12px"><span class="text-muted body-sm">Powered by Google Gemini</span><button class="btn btn-ghost btn-sm" id="chat-clear">New chat</button></span>
+        </div>
+        <div class="chat-messages" id="chat-messages">
+          <!-- Populated by JS -->
+        </div>
+        <div class="chat-suggestions" id="chat-suggestions">
+          <!-- Populated by JS -->
+        </div>
+        <div class="chat-input-area">
+          <input type="text" id="chat-input" placeholder="Ask me about movies..." autocomplete="off" maxlength="1000">
+          <button class="chat-send-btn" id="chat-send" aria-label="Send message">➤</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SECTION: AI Critic ─────────────────────────────────────────────── -->
+    <div class="section-page" id="section-critic">
+      <div class="section-page-header">
+        <h1>AI Movie Critic</h1>
+        <p>Deep AI analysis of any film — themes, strengths, weaknesses, and more</p>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:var(--space-xl)">
+        <input type="text" class="input-field" id="critic-input" placeholder="Enter a movie title, e.g. The Shawshank Redemption" style="flex:1">
+        <button class="btn btn-primary" id="critic-btn">🎭 Analyze</button>
+      </div>
+      <div id="critic-result">
+        <div style="text-align:center;padding:60px;color:var(--text-muted)">
+          <div style="font-size:3rem;margin-bottom:16px">🎭</div>
+          <p>Enter a movie title above to get a deep AI analysis</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SECTION: Movie Night Planner ──────────────────────────────────── -->
+    <div class="section-page" id="section-planner">
+      <div class="section-page-header">
+        <h1>Movie Night Planner</h1>
+        <p>Tell AI about your group — get the perfect film choice for everyone</p>
+      </div>
+      <div class="rec-form" style="max-width:600px;margin-bottom:var(--space-xl)">
+        <div class="rec-form-grid" style="grid-template-columns:1fr">
+          <div class="input-group">
+            <label class="input-label">Number of People</label>
+            <input type="number" class="input-field" id="planner-people" min="1" max="20" value="2" placeholder="How many people?">
+          </div>
+          <div class="input-group">
+            <label class="input-label">Group Mood</label>
+            <input type="text" class="input-field" id="planner-mood" placeholder="e.g. Excited, Relaxed, Adventurous...">
+          </div>
+          <div class="input-group">
+            <label class="input-label">Preferred Genres <span class="text-muted">(optional)</span></label>
+            <div id="planner-genres" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.875rem;color:var(--text-secondary)">
+                <input type="checkbox" value="Action"> Action</label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.875rem;color:var(--text-secondary)">
+                <input type="checkbox" value="Comedy"> Comedy</label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.875rem;color:var(--text-secondary)">
+                <input type="checkbox" value="Drama"> Drama</label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.875rem;color:var(--text-secondary)">
+                <input type="checkbox" value="Horror"> Horror</label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.875rem;color:var(--text-secondary)">
+                <input type="checkbox" value="Sci-Fi"> Sci-Fi</label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.875rem;color:var(--text-secondary)">
+                <input type="checkbox" value="Romance"> Romance</label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.875rem;color:var(--text-secondary)">
+                <input type="checkbox" value="Thriller"> Thriller</label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.875rem;color:var(--text-secondary)">
+                <input type="checkbox" value="Animation"> Animation</label>
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="planner-btn">🎉 Plan Movie Night</button>
+      </div>
+      <div id="planner-result"></div>
+    </div>
+
+    <!-- ── SECTION: Compare Films ─────────────────────────────────────────── -->
+    <div class="section-page" id="section-compare">
+      <div class="section-page-header">
+        <h1>Compare Films</h1>
+        <p>Head-to-head AI comparison across storytelling, direction, performances, and more</p>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:var(--space-md);align-items:end;margin-bottom:var(--space-xl)">
+        <div class="input-group">
+          <label class="input-label">First Movie</label>
+          <input type="text" class="input-field" id="compare-movie1" placeholder="e.g. The Dark Knight">
+        </div>
+        <div style="display:flex;align-items:center;padding-bottom:1px">
+          <div class="vs-badge">VS</div>
+        </div>
+        <div class="input-group">
+          <label class="input-label">Second Movie</label>
+          <input type="text" class="input-field" id="compare-movie2" placeholder="e.g. Joker">
+        </div>
+      </div>
+      <div style="text-align:center;margin-bottom:var(--space-xl)">
+        <button class="btn btn-primary" id="compare-btn" style="padding:14px 40px">⚡ Compare</button>
+      </div>
+      <div id="compare-result"></div>
+    </div>
+
+    <!-- ── SECTION: Watchlist ─────────────────────────────────────────────── -->
+    <div class="section-page" id="section-watchlist">
+      <div class="watchlist-header">
+        <div>
+          <h1 style="margin-bottom:4px">My Watchlist</h1>
+          <p class="text-muted body-sm" id="watchlist-count">0 saved</p>
+        </div>
+      </div>
+      <div class="watchlist-empty hidden" id="watchlist-empty">
+        <div class="empty-icon">🎬</div>
+        <h3>Your watchlist is empty</h3>
+        <p class="text-muted">Add movies using the ❤ button on any movie card</p>
+        <button class="btn btn-primary" style="margin-top:var(--space-lg)" data-navigate="search">
+          Browse Movies →
+        </button>
+      </div>
+      <div class="watchlist-grid" id="watchlist-grid">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- ── SECTION: History ───────────────────────────────────────────────── -->
+    <div class="section-page" id="section-history">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-xl)">
+        <div>
+          <h1 style="margin-bottom:4px">Recommendation History</h1>
+          <p class="text-muted body-sm">Your previous searches and AI recommendations</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="clear-history-btn">Clear All</button>
+      </div>
+      <div class="watchlist-empty hidden" id="history-empty">
+        <div class="empty-icon">📋</div>
+        <h3>No history yet</h3>
+        <p class="text-muted">Your recommendation history will appear here</p>
+      </div>
+      <div class="history-list" id="history-list">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- ── SECTION: Taste Profile ─────────────────────────────────────────── -->
+    <div class="section-page" id="section-profile">
+      <div class="section-page-header">
+        <h1>My Taste Profile</h1>
+        <p>AI-generated analysis of your cinematic preferences</p>
+      </div>
+
+      <!-- Stats row -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-md);margin-bottom:var(--space-xl)">
+        <div class="score-card">
+          <div class="score-big" id="stat-searches">0</div>
+          <div class="text-muted body-sm">Searches</div>
+        </div>
+        <div class="score-card">
+          <div class="score-big" id="stat-recs">0</div>
+          <div class="text-muted body-sm">Recommendations</div>
+        </div>
+        <div class="score-card">
+          <div class="score-big" id="stat-watchlist">0</div>
+          <div class="text-muted body-sm">Watchlist</div>
+        </div>
+        <div class="score-card">
+          <div class="score-big" id="stat-sessions">0</div>
+          <div class="text-muted body-sm">Sessions</div>
+        </div>
+      </div>
+
+      <!-- Taste profile content -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-md)">
+        <h2 class="heading-md">Taste Analysis</h2>
+        <button class="btn btn-secondary btn-sm" id="refresh-profile">↻ Refresh</button>
+      </div>
+      <div id="taste-profile-content">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Mobile sidebar toggle -->
+<button class="sidebar-toggle" id="sidebar-toggle" aria-label="Open menu">☰</button>
+
+<script type="module" src="/js/app.js"></script>
+
+</body>
+</html>
