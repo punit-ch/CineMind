@@ -32,12 +32,14 @@ class TTLCache {
 
   // Cleanup expired entries every 5 minutes
   startCleanup() {
-    setInterval(() => {
+    const timer = setInterval(() => {
       const now = Date.now();
       for (const [key, entry] of this.store.entries()) {
         if (now > entry.expiry) this.store.delete(key);
       }
     }, 5 * 60 * 1000);
+    // Don't keep the process (or a test run) alive just for cleanup
+    if (typeof timer.unref === 'function') timer.unref();
     return this;
   }
 }

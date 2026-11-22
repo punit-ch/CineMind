@@ -1,32 +1,10 @@
 // services/geminiService.js — Google Gemini AI integration
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const config = require('../config');
+const llm = require('./llmClient');
 const { cleanText, cleanList } = require('../utils/validate');
+const { parseJSON, asArray } = require('../utils/aiJson');
 
-const genAI = new GoogleGenerativeAI(config.gemini.apiKey || 'missing-key');
-const requestOptions = config.gemini.baseUrl ? { baseUrl: config.gemini.baseUrl } : undefined;
-
-// JSON-mode model: Gemini is forced to return valid JSON (no markdown fences)
-const getJsonModel = () =>
-  genAI.getGenerativeModel(
-    {
-      model: config.gemini.model,
-      generationConfig: { responseMimeType: 'application/json', temperature: 0.8 },
-    },
-    requestOptions
-  );
-
-// Pull the first JSON value out of a string (fallback if the model still adds noise)
-const parseJSON = (text) => {
-  const cleaned = String(text).replace(/```json\s*/gi, '').replace(/```/g, '').trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    const match = cleaned.match(/[\[{][\s\S]*[\]}]/);
-    if (!match) throw new SyntaxError('AI returned no JSON');
-    return JSON.parse(match[0]);
-  }
-};
+// Delay before the single retry (tests set AI_RETRY_DELAY_MS=0)
+const RETRY_DELAY_MS = Number(process.env.AI_RETRY_DELAY_MS ?? 600);
 
 const isRetryable = (err) =>
   err instanceof SyntaxError || [429, 500, 503].includes(err?.status);
@@ -36,22 +14,15 @@ async function generateJSON(prompt) {
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const result = await getJsonModel().generateContent(prompt);
-      return parseJSON(result.response.text());
+      return parseJSON(await llm.generateJSONText(prompt));
     } catch (err) {
       lastErr = err;
       if (!isRetryable(err)) break;
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
     }
   }
   throw lastErr;
 }
-
-const asArray = (value, key) => {
-  if (Array.isArray(value)) return value;
-  if (key && Array.isArray(value?.[key])) return value[key];
-  throw new SyntaxError('AI response had unexpected shape');
-};
 
 const geminiService = {
   // Generate movie recommendations based on user preferences
@@ -192,26 +163,7 @@ When recommending movies, include the year in parentheses.
 Keep responses concise but insightful — 2-4 sentences per recommendation.
 Format movie titles in *asterisks* for emphasis.`;
 
-    const model = genAI.getGenerativeModel(
-      { model: config.gemini.model, systemInstruction },
-      requestOptions
-    );
-
-    // Gemini requires history to start with a user turn and alternate roles
-    const turns = messages.map((m) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: cleanText(m.content, 2000) }],
-    }));
-    const last = turns.pop();
-    while (turns.length && turns[0].role !== 'user') turns.shift();
-
-    const chat = model.startChat({
-      history: turns,
-      generationConfig: { maxOutputTokens: 1000 },
-    });
-
-    const result = await chat.sendMessage(last.parts[0].text);
-    return result.response.text();
+    return llm.chat(messages, systemInstruction);
   },
 
   // Analyze viewing history (a list of movie titles) to build a taste profile

@@ -1,12 +1,23 @@
 // config/index.js — Central configuration
 require('dotenv').config();
 
+// Comma-separated env value -> trimmed, non-empty list
+const list = (value, fallback) =>
+  String(value ?? fallback)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
 const config = {
   port: Number(process.env.PORT) || 3000,
   nodeEnv: process.env.NODE_ENV || 'development',
   gemini: {
     apiKey: process.env.GEMINI_API_KEY,
-    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+    // Model names change often. Confirm the current free-tier names in Google AI Studio
+    // and override these with GEMINI_MODEL / GEMINI_FALLBACK_MODELS when needed.
+    model: process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
+    // Tried in order when the primary model is renamed or retired (HTTP 404 / "not found").
+    fallbackModels: list(process.env.GEMINI_FALLBACK_MODELS, 'gemini-3.1-flash-lite,gemini-3.8-flash,gemini-2.5-flash'),
     baseUrl: process.env.GEMINI_BASE_URL || undefined, // optional (proxy / tests)
   },
   tmdb: {
