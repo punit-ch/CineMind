@@ -1,6 +1,7 @@
 // controllers/aiController.js
 const geminiService = require('../services/geminiService');
 const tmdbService = require('../services/tmdbService');
+const tonightService = require('../services/tonightService');
 const { HttpError, cleanText, cleanList, toInt } = require('../utils/validate');
 
 // Merge AI suggestions with TMDB data (aligned by index, so no fuzzy title matching)
@@ -104,6 +105,31 @@ const aiController = {
     }
 
     res.json(plan);
+  },
+
+  // POST /api/ai/tonight
+  // body: { mood?, minutes?, type?: 'movie'|'tv'|'either', genres?: string[], page?, exclude?: ['movie:123', 'tv:456'] }
+  // Picks come from real TMDB candidates; if the AI is unavailable a code-ranked fallback is used.
+  async tonight(req, res) {
+    const body = req.body || {};
+    const type = body.type === undefined ? 'movie' : body.type;
+    if (!['movie', 'tv', 'either'].includes(type)) {
+      throw new HttpError(400, "type must be 'movie', 'tv' or 'either'");
+    }
+
+    const exclude = (Array.isArray(body.exclude) ? body.exclude : [])
+      .filter((v) => typeof v === 'string' && /^(movie|tv):\d+$/.test(v))
+      .slice(0, 200);
+
+    const result = await tonightService.recommendTonight({
+      type,
+      mood: cleanText(body.mood, 60),
+      minutes: toInt(body.minutes, undefined, { min: 20, max: 600 }),
+      genres: cleanList(body.genres, { maxItems: 6, maxLen: 30 }),
+      page: toInt(body.page, 1, { min: 1, max: 5 }),
+      exclude,
+    });
+    res.json(result);
   },
 
   // POST /api/ai/chat

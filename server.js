@@ -56,6 +56,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ─── API Routes ───────────────────────────────────────────────────────────────
 app.use('/api/ai', apiLimiter, aiLimiter, require('./routes/ai'));
 app.use('/api/movies', apiLimiter, require('./routes/movies'));
+app.use('/api/tv', apiLimiter, require('./routes/tv'));
 
 app.get('/api/health', (req, res) => {
   res.json({

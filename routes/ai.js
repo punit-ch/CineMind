@@ -9,6 +9,7 @@ const asyncHandler = (fn) => (req, res, next) =>
 
 router.post('/recommend', asyncHandler(aiController.recommend));
 router.post('/mood', asyncHandler(aiController.moodRecommend));
+router.post('/tonight', asyncHandler(aiController.tonight));
 router.post('/critic', asyncHandler(aiController.critic));
 router.post('/plan', asyncHandler(aiController.planNight));
 router.post('/chat', asyncHandler(aiController.chat));

@@ -54,6 +54,7 @@ export const aiApi = {
   moodRecommend: (mood) => post('/ai/mood', { mood }),
   critic: (title) => post('/ai/critic', { title }),
   planNight: (data) => post('/ai/plan', data),
+  tonight: (params) => post('/ai/tonight', params),
   chat: (messages) => post('/ai/chat', { messages }),
   tasteProfile: (titles) => post('/ai/profile', { titles }),
   compareMovies: (movie1, movie2) => post('/ai/compare', { movie1, movie2 }),
@@ -68,4 +69,13 @@ export const moviesApi = {
   trending: (window = 'week') => apiFetch(`/movies/trending?window=${window}`),
   topRated: () => apiFetch('/movies/top-rated'),
   byGenre: (genreId) => apiFetch(`/movies/genres/${genreId}`),
+};
+
+// ── TV Endpoints ──────────────────────────────────────────────────────────────
+export const tvApi = {
+  search: (query, page = 1) => apiFetch(`/tv/search?q=${encodeURIComponent(query)}&page=${page}`),
+  details: (id) => apiFetch(`/tv/${id}`),
+  season: (id, season) => apiFetch(`/tv/${id}/seasons/${season}`),
+  trending: (window = 'week') => apiFetch(`/tv/trending?window=${window}`),
+  topRated: () => apiFetch('/tv/top-rated'),
 };

@@ -3,11 +3,13 @@ const axios = require('axios');
 const config = require('../config');
 const cache = require('../utils/cache');
 
-const tmdb = axios.create({
+const realClient = axios.create({
   baseURL: config.tmdb.baseUrl,
   params: { api_key: config.tmdb.apiKey },
   timeout: 8000,
 });
+// Indirection so tests can swap the HTTP client (see _setHttpForTests)
+let tmdb = realClient;
 
 // Build full poster/backdrop URL
 const posterUrl = (path, size = config.tmdb.posterSize) =>
@@ -34,6 +36,26 @@ const GENRE_MAP = {
   14: 'Fantasy', 36: 'History', 27: 'Horror', 10402: 'Music',
   9648: 'Mystery', 10749: 'Romance', 878: 'Sci-Fi', 10770: 'TV Movie',
   53: 'Thriller', 10752: 'War', 37: 'Western',
+};
+
+// TV genres differ from movie genres in TMDB
+const TV_GENRE_MAP = {
+  10759: 'Action & Adventure', 16: 'Animation', 35: 'Comedy', 80: 'Crime',
+  99: 'Documentary', 18: 'Drama', 10751: 'Family', 10762: 'Kids',
+  9648: 'Mystery', 10763: 'News', 10764: 'Reality', 10765: 'Sci-Fi & Fantasy',
+  10766: 'Soap', 10767: 'Talk', 10768: 'War & Politics', 37: 'Western',
+};
+
+// Normalize a raw TMDB TV show object to the same shape as a movie, plus show-specific fields
+const normalizeShow = (show) => ({
+  ...normalizeMovie({ ...show, title: show.name, release_date: show.first_air_date }),
+  mediaType: 'tv',
+  firstAirYear: show.first_air_date ? show.first_air_date.slice(0, 4) : 'N/A',
+});
+
+const resolveTvGenres = (show) => {
+  if (show.genres?.length) return show;
+  return { ...show, genres: show.genreIds.map((id) => TV_GENRE_MAP[id] || 'Unknown') };
 };
 
 const tmdbService = {
@@ -172,7 +194,152 @@ const tmdbService = {
     return result;
   },
 
+  // ─── TV ────────────────────────────────────────────────────────────────────
+
+  async searchShows(query, page = 1) {
+    const cacheKey = `tv:search:${query.toLowerCase()}:${page}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+
+    const { data } = await tmdb.get('/search/tv', {
+      params: { query, page, include_adult: false },
+    });
+    const result = {
+      shows: data.results.slice(0, 20).map(normalizeShow).map(resolveTvGenres),
+      totalPages: data.total_pages,
+      currentPage: page,
+    };
+    cache.set(cacheKey, result);
+    return result;
+  },
+
+  // Show details with its season list (episode lists come from getSeason)
+  async getShowDetails(showId) {
+    const cacheKey = `tv:show:${showId}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+
+    const { data } = await tmdb.get(`/tv/${showId}`, {
+      params: { append_to_response: 'credits,videos' },
+    });
+    const trailer = (data.videos?.results || []).find(
+      (v) => v.site === 'YouTube' && v.type === 'Trailer'
+    );
+
+    const result = {
+      ...normalizeShow(data),
+      tagline: data.tagline || '',
+      status: data.status || null,
+      numberOfSeasons: data.number_of_seasons ?? null,
+      numberOfEpisodes: data.number_of_episodes ?? null,
+      episodeRuntime: (data.episode_run_time || [])[0] || null,
+      creators: (data.created_by || []).map((c) => c.name),
+      cast: (data.credits?.cast || []).slice(0, 6).map((c) => c.name),
+      trailerUrl: trailer ? `https://www.youtube.com/watch?v=${trailer.key}` : null,
+      seasons: (data.seasons || []).map((se) => ({
+        seasonNumber: se.season_number,
+        name: se.name,
+        episodeCount: se.episode_count,
+        airYear: se.air_date ? se.air_date.slice(0, 4) : null,
+        poster: posterUrl(se.poster_path),
+      })),
+      nextEpisodeToAir: data.next_episode_to_air
+        ? {
+            seasonNumber: data.next_episode_to_air.season_number,
+            episodeNumber: data.next_episode_to_air.episode_number,
+            airDate: data.next_episode_to_air.air_date || null,
+          }
+        : null,
+    };
+    cache.set(cacheKey, result);
+    return result;
+  },
+
+  // Episode list for one season. Episode titles and summaries can contain spoilers:
+  // clients should hide them for unwatched episodes (the "Spoiler Shield").
+  async getSeason(showId, seasonNumber) {
+    const cacheKey = `tv:season:${showId}:${seasonNumber}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+
+    const { data } = await tmdb.get(`/tv/${showId}/season/${seasonNumber}`);
+    const result = {
+      showId: Number(showId),
+      seasonNumber: data.season_number,
+      name: data.name,
+      airYear: data.air_date ? data.air_date.slice(0, 4) : null,
+      episodes: (data.episodes || []).map((e) => ({
+        episodeNumber: e.episode_number,
+        name: e.name,
+        overview: e.overview,
+        airDate: e.air_date || null,
+        runtime: e.runtime || null,
+        still: posterUrl(e.still_path, 'w300'),
+        rating: e.vote_average ? parseFloat(e.vote_average.toFixed(1)) : 0,
+      })),
+    };
+    cache.set(cacheKey, result);
+    return result;
+  },
+
+  async getTrendingShows(timeWindow = 'week', page = 1) {
+    const cacheKey = `tv:trending:${timeWindow}:${page}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+
+    const { data } = await tmdb.get(`/trending/tv/${timeWindow}`, { params: { page } });
+    const result = data.results.slice(0, 20).map(normalizeShow).map(resolveTvGenres);
+    cache.set(cacheKey, result, 15 * 60 * 1000);
+    return result;
+  },
+
+  async getTopRatedShows(page = 1) {
+    const cacheKey = `tv:toprated:${page}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+
+    const { data } = await tmdb.get('/tv/top_rated', { params: { page } });
+    const result = data.results.slice(0, 20).map(normalizeShow).map(resolveTvGenres);
+    cache.set(cacheKey, result);
+    return result;
+  },
+
+  // ─── Candidate discovery (used by the Tonight flow) ────────────────────────
+
+  // Real titles that match the filters, as the pool the AI is allowed to choose from.
+  //  mediaType: 'movie' | 'tv'   genreIds: number[] (OR-combined)   maxRuntime: minutes (movies only)
+  async discoverCandidates({ mediaType = 'movie', genreIds = [], maxRuntime, page = 1 } = {}) {
+    const isTv = mediaType === 'tv';
+    const genreParam = [...genreIds].sort((a, b) => a - b).join('|');
+    const cacheKey = `cand:${mediaType}:${genreParam}:${maxRuntime || ''}:${page}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+
+    const params = {
+      sort_by: 'popularity.desc',
+      'vote_count.gte': 300, // skip obscure titles with unreliable ratings
+      'vote_average.gte': 6.3,
+      include_adult: false,
+      page,
+    };
+    if (genreParam) params.with_genres = genreParam;
+    if (!isTv && maxRuntime) params['with_runtime.lte'] = maxRuntime;
+
+    const { data } = await tmdb.get(isTv ? '/discover/tv' : '/discover/movie', { params });
+    const result = data.results.slice(0, 20).map((r) =>
+      isTv ? resolveTvGenres(normalizeShow(r)) : { ...this.resolveGenres(normalizeMovie(r)), mediaType: 'movie' }
+    );
+    cache.set(cacheKey, result, 15 * 60 * 1000);
+    return result;
+  },
+
+  // Test hook (not used by the app)
+  _setHttpForTests(fake) {
+    tmdb = fake || realClient;
+  },
+
   GENRE_MAP,
+  TV_GENRE_MAP,
 };
 
 module.exports = tmdbService;

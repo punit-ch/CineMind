@@ -18,7 +18,7 @@ npm test               # Node's built-in test runner, no network needed
 Tests live in `test/` and run in CI on every push and pull request.
 
 ## Features
-Recommendations (taste form + mood) · Search · Trending / Top Rated / genre browse · AI Chat · AI Critic · Movie Night Planner · Compare Films · Watchlist · History · AI Taste Profile
+Recommendations (taste form + mood) · Tonight (three spoiler-free picks for right now) · Search · Trending / Top Rated / genre browse · TV shows, seasons and episodes (API) · AI Chat · AI Critic · Movie Night Planner · Compare Films · Watchlist · History · AI Taste Profile
 
 Watchlist, history and taste-profile cache are stored in the browser (`localStorage`); there are no user accounts.
 
@@ -32,4 +32,19 @@ Watchlist, history and taste-profile cache are stored in the browser (`localStor
 | `ALLOWED_ORIGIN` | CORS origin in production |
 
 ## API
-`GET /api/health` · `GET /api/movies/{search,trending,top-rated,genres/:id,:id,:id/similar}` · `POST /api/ai/{recommend,mood,critic,plan,chat,profile,compare}`
+`GET /api/health` · `GET /api/movies/{search,trending,top-rated,genres/:id,:id,:id/similar}` · `GET /api/tv/{search,trending,top-rated,:id,:id/seasons/:season}` · `POST /api/ai/{recommend,mood,tonight,critic,plan,chat,profile,compare}`
+
+### Tonight (`POST /api/ai/tonight`)
+Picks three real titles for tonight. Candidates come from TMDB (filtered by mood, time available and type), the AI
+only re-ranks and explains them, and if the AI is unavailable the endpoint falls back to a code-ranked list.
+
+```json
+{ "mood": "cozy", "minutes": 100, "type": "movie", "genres": ["Comedy"], "page": 1, "exclude": ["movie:550", "tv:1396"] }
+```
+`type` is `movie`, `tv` or `either`. Use `page` (1 to 5) and `exclude` for "not this one". The response lists `picks`
+(each with `reason`, `tonightFit` and `source` of `ai` or `fallback`), the overall `source`, and `candidatesConsidered`.
+Overviews are left out on purpose, because they can contain spoilers.
+
+## Spoiler-free AI
+Every AI prompt carries a strict no-spoilers rule (`services/spoilerPolicy.js`). This reduces spoiler risk, but language
+models cannot guarantee zero spoilers.
