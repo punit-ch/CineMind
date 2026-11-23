@@ -72,6 +72,7 @@ export function showSkeletons(container, count, type = 'card') {
 // Compact movie payload stored on card elements (read back by the delegated handlers)
 const cardData = (m) => esc(JSON.stringify({
   id: m.id,
+  mediaType: m.mediaType || 'movie',
   title: m.title,
   poster: m.poster || null,
   rating: m.rating ?? 0,
@@ -96,9 +97,10 @@ export function buildMovieCard(movie, options = {}) {
   const title = esc(movie.title);
   const year = esc(movie.releaseYear || movie.year || '—');
   const id = esc(movie.id ?? '');
+  const mediaType = esc(movie.mediaType || 'movie');
 
   return `
-    <div class="movie-card" data-movie-id="${id}" data-movie="${cardData(movie)}"
+    <div class="movie-card" data-movie-id="${id}" data-media-type="${mediaType}" data-movie="${cardData(movie)}"
          tabindex="0" role="button" aria-label="${title}">
       ${poster
         ? `<img class="movie-card__poster" src="${poster}" alt="${title}" loading="lazy">`
@@ -249,6 +251,54 @@ export function buildMovieModal(movie) {
             ? `<a class="btn btn-secondary btn-sm" href="${esc(movie.trailerUrl)}" target="_blank" rel="noopener noreferrer">▶ Trailer</a>`
             : ''}
         </div>
+      </div>
+    </div>`;
+}
+
+export function buildTvModal(show) {
+  const genres = (show.genres || []).join(', ') || 'Unknown';
+  const poster = safeUrl(show.poster);
+  const backdrop = safeUrl(show.backdrop);
+  const title = esc(show.title);
+  const facts = [
+    show.numberOfSeasons ? `${show.numberOfSeasons} season${show.numberOfSeasons === 1 ? '' : 's'}` : '',
+    show.episodeRuntime ? `${show.episodeRuntime} min episodes` : '',
+    show.status || '',
+  ].filter(Boolean);
+  const seasons = (show.seasons || []).filter((season) => season.seasonNumber > 0);
+
+  return `
+    ${backdrop ? `<img src="${backdrop}" alt="" class="modal-backdrop-img">` : ''}
+    <div class="modal-movie">
+      ${poster
+        ? `<img src="${poster}" alt="${title}" class="modal-movie__poster">`
+        : '<div class="modal-movie__poster" style="background:var(--bg-elevated)"></div>'}
+      <div>
+        <h2 style="font-size:1.5rem;margin-bottom:4px">${title}</h2>
+        ${show.tagline ? `<p class="text-muted body-sm" style="font-style:italic;margin-bottom:8px">${esc(show.tagline)}</p>` : ''}
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+          <span class="rating">${STAR_SVG.replace('<svg', '<svg style="width:14px;height:14px;fill:currentColor"')}${formatRating(show.rating)}</span>
+          <span class="tag">${esc(show.firstAirYear || show.releaseYear || '—')}</span>
+          <span class="text-secondary">${esc(genres)}</span>
+        </div>
+        ${facts.length ? `<p class="text-muted body-sm" style="margin-bottom:12px">${facts.map(esc).join(' · ')}</p>` : ''}
+        <p style="color:var(--text-secondary);font-size:0.9375rem;line-height:1.7">${esc(show.overview || 'No overview available.')}</p>
+        ${show.creators?.length ? `<p class="text-muted body-sm" style="margin-top:12px"><strong>Created by:</strong> ${show.creators.map(esc).join(', ')}</p>` : ''}
+        ${show.cast?.length ? `<p class="text-muted body-sm" style="margin-top:12px"><strong>Cast:</strong> ${show.cast.map(esc).join(', ')}</p>` : ''}
+        <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm watchlist-toggle-modal"
+                  data-movie-id="${esc(show.id)}" data-movie="${cardData(show)}">❤ Add to Watchlist</button>
+          ${show.trailerUrl && /^https:\/\/www\.youtube\.com\//.test(show.trailerUrl)
+            ? `<a class="btn btn-secondary btn-sm" href="${esc(show.trailerUrl)}" target="_blank" rel="noopener noreferrer">▶ Trailer</a>`
+            : ''}
+        </div>
+        ${seasons.length ? `
+          <div style="margin-top:24px">
+            <h3 style="font-size:1rem;margin-bottom:12px;color:var(--text-secondary)">Seasons</h3>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              ${seasons.map((season) => `<button class="btn btn-secondary btn-sm tv-season-btn" data-season="${season.seasonNumber}">${esc(season.name)} · ${season.episodeCount} episodes</button>`).join('')}
+            </div>
+          </div>` : ''}
       </div>
     </div>`;
 }

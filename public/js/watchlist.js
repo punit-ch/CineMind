@@ -20,13 +20,18 @@ function saveWatchlist(list) {
   }
 }
 
-export function isInWatchlist(movieId) {
-  return getWatchlist().some((m) => Number(m.id) === Number(movieId));
+export function isInWatchlist(movieId, mediaType = 'movie') {
+  return getWatchlist().some((m) =>
+    Number(m.id) === Number(movieId) && (m.mediaType || 'movie') === mediaType
+  );
 }
+
+const mediaKey = (item) => `${item.mediaType || 'movie'}:${item.id}`;
 
 // Keep only what the cards need (saves storage, avoids stale blobs)
 const slim = (m) => ({
   id: Number(m.id),
+  mediaType: m.mediaType || 'movie',
   title: m.title,
   poster: m.poster || null,
   rating: m.rating ?? 0,
@@ -37,7 +42,8 @@ const slim = (m) => ({
 export function toggleWatchlist(movie) {
   if (!movie || movie.id == null) return false;
   const list = getWatchlist();
-  const idx = list.findIndex((m) => Number(m.id) === Number(movie.id));
+  const key = mediaKey(movie);
+  const idx = list.findIndex((m) => mediaKey(m) === key);
 
   if (idx >= 0) {
     list.splice(idx, 1);
@@ -54,14 +60,19 @@ export function toggleWatchlist(movie) {
 // Make every heart button / modal button on the page reflect the real state
 export function syncWatchlistButtons(root = document) {
   root.querySelectorAll('.watchlist-toggle').forEach((btn) => {
-    const on = isInWatchlist(btn.dataset.movieId);
+    const owner = btn.closest('[data-movie]');
+    let mediaType = 'movie';
+    try { mediaType = JSON.parse(owner?.dataset.movie || '{}').mediaType || 'movie'; } catch {}
+    const on = isInWatchlist(btn.dataset.movieId, mediaType);
     btn.textContent = on ? '❤️' : '🤍';
     btn.classList.toggle('active', on);
     btn.title = on ? 'Remove from watchlist' : 'Add to watchlist';
     btn.setAttribute('aria-pressed', String(on));
   });
   root.querySelectorAll('.watchlist-toggle-modal').forEach((btn) => {
-    const on = isInWatchlist(btn.dataset.movieId);
+    let mediaType = 'movie';
+    try { mediaType = JSON.parse(btn.dataset.movie || '{}').mediaType || 'movie'; } catch {}
+    const on = isInWatchlist(btn.dataset.movieId, mediaType);
     btn.textContent = on ? '✓ In Watchlist' : '❤ Add to Watchlist';
     btn.classList.toggle('btn-secondary', on);
     btn.classList.toggle('btn-primary', !on);

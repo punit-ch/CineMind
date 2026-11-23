@@ -5,17 +5,21 @@ import { initChat } from './chat.js';
 import { initTrending } from './trending.js';
 import { initProfile } from './profile.js';
 import { initCritic, initPlanner, initComparison } from './tools.js';
+import { initTonight } from './tonight.js';
 import { renderWatchlist, toggleWatchlist, syncWatchlistButtons } from './watchlist.js';
 import { renderHistory } from './history.js';
+import { initTv } from './tv.js';
 import {
-  openModal, closeModal, buildMovieModal, buildMovieCard, readCardMovie, showToast, esc,
+  openModal, closeModal, buildMovieModal, buildTvModal, buildMovieCard, readCardMovie, showToast, esc,
 } from './ui.js';
-import { moviesApi } from './api.js';
+import { moviesApi, tvApi } from './api.js';
 
 const TITLES = {
   home: 'Home',
+  tonight: 'Tonight',
   recommendations: 'Recommendations',
   search: 'Movie Search',
+  tv: 'TV Shows',
   trending: 'Trending & Top Rated',
   chat: 'AI Chat',
   critic: 'AI Critic',
@@ -78,8 +82,10 @@ function activateSection(section) {
 function initSection(section, el) {
   switch (section) {
     case 'home': initHome(el); break;
+    case 'tonight': initTonight(el); break;
     case 'recommendations': initRecommendations(el); break;
     case 'search': initSearch(el); break;
+    case 'tv': initTv(el); break;
     case 'trending': initTrending(el); break;
     case 'chat': initChat(el); break;
     case 'critic': initCritic(el); break;
@@ -147,6 +153,47 @@ export async function openMovieDetail(id) {
   }
 }
 
+export async function openTvDetail(id) {
+  if (!id) return;
+  const requestId = ++detailRequest;
+  try {
+    const show = await tvApi.details(id);
+    if (requestId !== detailRequest) return;
+    openModal(show.title, buildTvModal(show));
+    syncWatchlistButtons(document.getElementById('modal-body'));
+  } catch (err) {
+    showToast(`Could not load TV show details: ${err.message}`, 'error');
+  }
+}
+
+async function openTvSeason(showId, seasonNumber) {
+  const body = document.getElementById('modal-body');
+  if (!body) return;
+  try {
+    const season = await tvApi.season(showId, seasonNumber);
+    let seasonEl = body.querySelector('.tv-season-list');
+    if (!seasonEl) {
+      seasonEl = document.createElement('div');
+      seasonEl.className = 'tv-season-list';
+      seasonEl.style.marginTop = '24px';
+      body.appendChild(seasonEl);
+    }
+    seasonEl.innerHTML = `
+      <h3 style="font-size:1rem;margin-bottom:12px;color:var(--text-secondary)">
+        ${esc(season.name || `Season ${season.seasonNumber}`)}
+      </h3>
+      ${season.episodes?.length ? season.episodes.map((episode) => `
+        <div style="padding:10px 0;border-top:1px solid var(--border)">
+          <strong>${episode.episodeNumber}. ${esc(episode.name || 'Untitled')}</strong>
+          ${episode.runtime ? `<span class="text-muted body-sm"> · ${episode.runtime} min</span>` : ''}
+          ${episode.overview ? `<p class="text-muted body-sm" style="margin-top:4px">${esc(episode.overview)}</p>` : ''}
+        </div>`).join('') : '<p class="text-muted">No episodes available.</p>'}`;
+    seasonEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (err) {
+    showToast(`Could not load season: ${err.message}`, 'error');
+  }
+}
+
 async function loadSimilarMovies(movieId, requestId) {
   try {
     const { movies } = await moviesApi.similar(movieId);
@@ -167,6 +214,14 @@ async function loadSimilarMovies(movieId, requestId) {
 // ── Global delegated clicks: one place handles cards on every screen ─────────
 function bindGlobalHandlers() {
   document.addEventListener('click', (e) => {
+    const seasonBtn = e.target.closest('.tv-season-btn');
+    if (seasonBtn) {
+      const showId = document.querySelector('.watchlist-toggle-modal')?.dataset.movieId;
+      const seasonNumber = seasonBtn.dataset.season;
+      if (showId && seasonNumber) openTvSeason(showId, seasonNumber);
+      return;
+    }
+
     // Watchlist heart (cards, rec cards)
     const heart = e.target.closest('.watchlist-toggle');
     if (heart) {
@@ -194,10 +249,14 @@ function bindGlobalHandlers() {
 
     // Open details: info button, movie card, or rec card
     const info = e.target.closest('.movie-info-btn');
-    const card = info || e.target.closest('.movie-card, .rec-card');
+    const card = info?.closest('.movie-card') || e.target.closest('.movie-card, .rec-card');
     if (card) {
       const id = info ? info.dataset.movieId : card.dataset.movieId;
-      if (id) openMovieDetail(id);
+      const mediaType = card.dataset.mediaType || readCardMovie(card)?.mediaType || 'movie';
+      if (id) {
+        if (mediaType === 'tv') openTvDetail(id);
+        else openMovieDetail(id);
+      }
     }
   });
 

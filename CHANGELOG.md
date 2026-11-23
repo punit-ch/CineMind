@@ -16,7 +16,26 @@
   fallback and chat history building, and `geminiService` behaviour (retries, prompt cleaning) with a stubbed client.
 - GitHub Actions workflow (`.github/workflows/ci.yml`) running the tests on Node 20 and 22.
 - `GEMINI_FALLBACK_MODELS` environment variable.
+- TV support: `GET /api/tv/search`, `/trending`, `/top-rated`, `/:id` (with seasons) and `/:id/seasons/:season`
+  (episode lists; clients should hide titles and summaries of unwatched episodes).
+- `POST /api/ai/tonight`: three real picks per request from TMDB candidates, with AI re-ranking validated against the
+  candidate list and a code-ranked fallback when the AI is unavailable. Supports movies, TV or both.
+- Spoiler-free rule (`services/spoilerPolicy.js`) appended to every AI prompt and to the chat system instruction.
+
+- Tonight screen in the dashboard (`public/js/tonight.js`, `public/js/tonightLogic.js`, `public/css/tonight.css`):
+  choose Movie, TV or Either, available time and mood, get three picks with reasons, and ask for different picks.
+  Movie picks open the existing detail modal and can be added to the watchlist; TV picks link to TMDB until
+  TV detail screens exist. The last choices are remembered in `localStorage`.
+- `scripts/apply_tonight_ui.py`: one-time script that adds the Tonight section, nav item, quick-action card and
+  wiring to `public/dashboard.html`, `public/js/app.js` and `public/js/api.js`.
+
+### Changed (spoiler policy)
+- The critic prompt no longer asks for real scenes. `bestMoment` and `hiddenDetails` keep their keys but now ask for
+  spoiler-free content, so the frontend does not need changes.
+- The chat assistant now declines spoiler requests.
 
 ### Unchanged
-- AI prompts, API routes and response shapes are exactly as before. Spoiler-related prompt changes and
-  grounding recommendations in TMDB candidates are planned as separate changes.
+- Existing API routes and response shapes. Movie endpoints behave as before.
+
+### Not done yet
+- TV screens (browse, details, episode tracking), accounts, and an automated spoiler check on AI output.
