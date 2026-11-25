@@ -29,6 +29,17 @@
 - `scripts/apply_tonight_ui.py`: one-time script that adds the Tonight section, nav item, quick-action card and
   wiring to `public/dashboard.html`, `public/js/app.js` and `public/js/api.js`.
 
+- Library screen (`public/js/library/*`, `public/css/library.css`): film and TV queues with drag and arrow
+  reordering, a diary with ratings out of 10 (decimals, stored as integer tenths), reviews, rewatch flag and private
+  details, stats, and versioned JSON export/import with strict validation. Stored in `localStorage`.
+- TV episode tracking in the Library (TV tab): a "Watching" shelf with progress and the next episode, an Episodes
+  panel per show with season selector, per-episode checkboxes, "Up to here" (marks earlier seasons too) and a
+  Spoiler Shield (titles and summaries of unwatched episodes stay hidden until watched or revealed). A show moves to
+  Watching when you mark its first episode and to Watched when every known episode is done. Library data format is
+  now schema v2 (adds `episodes`); v1 files and previously saved data still load.
+- "+ Queue" button on Tonight picks.
+- Test helper `testing/loadEsm.js` to unit-test browser ES modules under Node.
+
 ### Changed (spoiler policy)
 - The critic prompt no longer asks for real scenes. `bestMoment` and `hiddenDetails` keep their keys but now ask for
   spoiler-free content, so the frontend does not need changes.
@@ -38,4 +49,5 @@
 - Existing API routes and response shapes. Movie endpoints behave as before.
 
 ### Not done yet
-- TV screens (browse, details, episode tracking), accounts, and an automated spoiler check on AI output.
+- Per-episode watch dates and ratings, editing diary entries, accounts and a database, and an automated spoiler check on AI output.
+- Merging the older Watchlist with the Library queue (they are separate for now).
