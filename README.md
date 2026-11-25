@@ -18,9 +18,15 @@ npm test               # Node's built-in test runner, no network needed
 Tests live in `test/` and run in CI on every push and pull request.
 
 ## Features
-Recommendations (taste form + mood) · Tonight (three spoiler-free picks for right now) · Search · Trending / Top Rated / genre browse · TV shows, seasons and episodes (API) · AI Chat · AI Critic · Movie Night Planner · Compare Films · Watchlist · History · AI Taste Profile
+Recommendations (taste form + mood) · Tonight (three spoiler-free picks for right now) · Search · Trending / Top Rated / genre browse · TV shows, seasons and episodes (API) · AI Chat · AI Critic · Movie Night Planner · Compare Films · Watchlist · History · AI Taste Profile · Library (queues, diary, ratings out of 10, JSON export/import)
 
-Watchlist, history and taste-profile cache are stored in the browser (`localStorage`); there are no user accounts.
+Watchlist, history, taste-profile cache and the Library are stored in the browser (`localStorage`); there are no user accounts.
+
+### Library
+Separate film and TV queues (drag or use the arrows to rank), TV episode tracking with a Spoiler Shield (hidden titles for unwatched episodes), a viewing diary (date, rating out of 10 with decimals,
+review, rewatch flag, and private details such as who with, where, mood and notes), simple stats, and JSON
+export/import (merge or replace). Data lives only in this browser, so export regularly. The export format is versioned
+(`version: 2`) and is designed to import into a database later.
 
 ## Config
 | Variable | Purpose |

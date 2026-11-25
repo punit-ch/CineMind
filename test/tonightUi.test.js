@@ -6,27 +6,20 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { loadEsm } = require('../testing/loadEsm');
 const read = (file) => fs.readFileSync(path.join(__dirname, '..', 'public', 'js', file), 'utf8');
-
-function loadEsm(file, scope = {}) {
-  const names = [];
-  const src = read(file)
-    .replace(/^import[\s\S]*?from\s+'[^']+';\s*$/gm, '')
-    .replace(/^export (async function|function|const|let|class) ([A-Za-z0-9_]+)/gm, (m, kind, name) => {
-      names.push(name);
-      return `${kind} ${name}`;
-    });
-  return new Function(...Object.keys(scope), `${src}\nreturn { ${names.join(', ')} };`)(...Object.values(scope));
-}
 
 const ui = loadEsm('ui.js');
 const logic = loadEsm('tonightLogic.js');
+const libraryCore = loadEsm('library/libraryCore.js');
 const view = loadEsm('tonight.js', {
   aiApi: {},
   esc: ui.esc,
   showToast() {},
   setLoading() {},
   syncWatchlistButtons() {},
+  getLibraryStore() {},
+  ...libraryCore,
   ...logic,
 });
 
@@ -112,6 +105,18 @@ test('a TV card links out to TMDB and has no movie-only controls', () => {
   assert.ok(!html.includes('watchlist-toggle'));
   assert.ok(!html.includes('data-movie='));
   assert.ok(html.includes('tonight-card__source--top'));
+});
+
+test('every card has a queue button, which is disabled once the title is queued', () => {
+  assert.match(view.buildTonightCard(moviePick), /data-queue-ref="movie:11" >\+ Queue/);
+  assert.match(view.buildTonightCard({ ...moviePick, id: 7, mediaType: 'tv' }, 0, true), /data-queue-ref="tv:7" disabled>In queue/);
+});
+
+test('queue button data works with the library core (a pick can be queued as is)', () => {
+  const pick = { id: 21, mediaType: 'tv', title: 'The Wire', releaseYear: '2002', poster: 'https://image.tmdb.org/t/p/w500/w.jpg', genres: ['Crime'], reason: 'r', source: 'ai' };
+  const lib = libraryCore.addToQueue(libraryCore.emptyLibrary(), pick);
+  assert.deepEqual(lib.queue.tv.map((q) => q.ref), ['tv:21']);
+  assert.equal(lib.items['tv:21'].title, 'The Wire');
 });
 
 test('unsafe poster URLs are not rendered as images', () => {

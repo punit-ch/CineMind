@@ -2,6 +2,8 @@
 import { aiApi } from './api.js';
 import { esc, showToast, setLoading } from './ui.js';
 import { syncWatchlistButtons } from './watchlist.js';
+import { getLibraryStore } from './library/instance.js';
+import { addToQueue, LibraryError } from './library/libraryCore.js';
 import {
   TYPES, TIMES, MOODS, buildRequest, nextPage, refOf, sourceLabel, tmdbUrl, movieData, loadPrefs, savePrefs,
 } from './tonightLogic.js';
@@ -12,7 +14,7 @@ const safeImg = (url) => (/^https?:\/\//i.test(url || '') ? esc(url) : '');
 const STAR = '★';
 
 // ── Card ──────────────────────────────────────────────────────────────────────
-export function buildTonightCard(pick, index = 0) {
+export function buildTonightCard(pick, index = 0, queued = false) {
   const title = esc(pick.title);
   const poster = safeImg(pick.poster);
   const isTv = pick.mediaType === 'tv';
@@ -42,6 +44,7 @@ export function buildTonightCard(pick, index = 0) {
           <span class="tonight-card__source tonight-card__source--${pick.source === 'ai' ? 'ai' : 'top'}">${esc(sourceLabel(pick.source))}</span>
         </div>
         <div class="tonight-card__actions">
+          <button type="button" class="btn btn-primary btn-sm" data-queue-ref="${esc(refOf(pick))}" ${queued ? 'disabled' : ''}>${queued ? 'In queue' : '+ Queue'}</button>
           ${isTv
             ? `<a class="btn btn-secondary btn-sm" href="${esc(tmdbUrl(pick))}" target="_blank" rel="noopener noreferrer">View on TMDB ↗</a>`
             : `<button type="button" class="btn btn-secondary btn-sm movie-info-btn" data-movie-id="${esc(pick.id)}">Details</button>
@@ -68,7 +71,9 @@ export function initTonight(root) {
   if (!typeEl || !timeEl || !moodsEl || !moodInput || !goBtn || !againBtn || !results) return;
 
   const prefs = loadPrefs(window.localStorage);
-  const state = { page: 1, shown: [], loading: false, request: 0 };
+  const state = { page: 1, shown: [], loading: false, request: 0, picks: new Map() };
+  const store = getLibraryStore();
+  const queuedRefs = () => new Set([...store.get().queue.movie, ...store.get().queue.tv].map((q) => q.ref));
 
   // Segmented controls (radio behaviour)
   const renderSegment = (el, options, isSelected, onSelect) => {
@@ -148,7 +153,9 @@ export function initTonight(root) {
         return;
       }
       state.shown.push(...data.picks.map(refOf));
-      results.innerHTML = data.picks.map((p, i) => buildTonightCard(p, i)).join('');
+      state.picks = new Map(data.picks.map((p) => [refOf(p), p]));
+      const queued = queuedRefs();
+      results.innerHTML = data.picks.map((p, i) => buildTonightCard(p, i, queued.has(refOf(p)))).join('');
       syncWatchlistButtons(results);
       moreEl.classList.remove('hidden');
       if (data.source === 'fallback') {
@@ -166,6 +173,21 @@ export function initTonight(root) {
       againBtn.disabled = false;
     }
   }
+
+  // "+ Queue": send a pick straight into the Library queue
+  results.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-queue-ref]');
+    const pick = btn && !btn.disabled ? state.picks.get(btn.dataset.queueRef) : null;
+    if (!pick) return;
+    try {
+      store.update((lib) => addToQueue(lib, pick));
+      btn.textContent = 'In queue';
+      btn.disabled = true;
+      showToast(`Added ${pick.title} to your ${pick.mediaType === 'tv' ? 'TV' : 'film'} queue`, 'success');
+    } catch (err) {
+      showToast(err instanceof LibraryError ? err.message : 'Could not add to the queue', 'error');
+    }
+  });
 
   goBtn.addEventListener('click', () => run(true));
   againBtn.addEventListener('click', () => {
