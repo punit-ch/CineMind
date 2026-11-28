@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/css/main.css">
   <link rel="stylesheet" href="/css/dashboard.css">
   <link rel="stylesheet" href="/css/tonight.css">
+  <link rel="stylesheet" href="/css/library.css">
 </head>
 <body>
 
@@ -62,14 +63,29 @@
       </button>
 
       <div class="nav-section-label" style="margin-top:12px">Library</div>
+      <button class="nav-item" data-section="library">
+        <span class="nav-icon">📚</span> My Library
+      </button>
+      <button class="nav-item" data-section="diary">
+        <span class="nav-icon">📖</span> Viewing Diary
+      </button>
+      <button class="nav-item" data-section="queue">
+        <span class="nav-icon">⏭️</span> Up Next Queue
+      </button>
+      <button class="nav-item" data-section="ratings">
+        <span class="nav-icon">⭐</span> Ratings
+      </button>
       <button class="nav-item" data-section="watchlist">
-        <span class="nav-icon">❤️</span> Watchlist
+        <span class="nav-icon">❤️</span> Watchlist (Legacy)
       </button>
       <button class="nav-item" data-section="history">
         <span class="nav-icon">📋</span> History
       </button>
       <button class="nav-item" data-section="profile">
         <span class="nav-icon">📊</span> Taste Profile
+      </button>
+      <button class="nav-item" data-section="import">
+        <span class="nav-icon">📥</span> Import Data
       </button>
     </nav>
 
@@ -501,6 +517,183 @@
         <button class="btn btn-secondary btn-sm" id="refresh-profile">↻ Refresh</button>
       </div>
       <div id="taste-profile-content">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- ── SECTION: My Library ───────────────────────────────────────────────── -->
+    <div class="section-page" id="section-library">
+      <div class="section-page-header">
+        <h1>My Library</h1>
+        <p>Organize your movies and TV shows</p>
+      </div>
+      <div class="library-toolbar">
+        <div class="library-filter-group">
+          <label for="library-status-filter" class="input-label">Status</label>
+          <select id="library-status-filter" class="input-field">
+            <option value="">All</option>
+            <option value="watchlist">Watchlist</option>
+            <option value="watching">Watching</option>
+            <option value="watched">Watched</option>
+            <option value="dropped">Dropped</option>
+          </select>
+        </div>
+        <div class="library-filter-group">
+          <label for="library-type-filter" class="input-label">Type</label>
+          <select id="library-type-filter" class="input-field">
+            <option value="">All</option>
+            <option value="movie">Movies</option>
+            <option value="tv">TV Shows</option>
+          </select>
+        </div>
+        <div class="library-search-group">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="library-search" class="input-field" placeholder="Search your library...">
+        </div>
+      </div>
+      <div class="library-stats" id="library-stats">
+        <!-- Populated by JS -->
+      </div>
+      <div class="library-empty hidden" id="library-empty">
+        <div class="empty-icon">📚</div>
+        <h3>Your library is empty</h3>
+        <p class="text-muted">Add movies and shows using the ❤ button on any movie card</p>
+        <button class="btn btn-primary" style="margin-top:var(--space-lg)" data-navigate="search">
+          Browse Movies →
+        </button>
+      </div>
+      <div class="library-grid" id="library-grid">
+        <!-- Populated by JS -->
+      </div>
+      <div style="text-align:center;margin-top:var(--space-xl)">
+        <button class="btn btn-secondary hidden" id="library-load-more">Load More</button>
+      </div>
+    </div>
+
+    <!-- ── SECTION: Viewing Diary ───────────────────────────────────────────── -->
+    <div class="section-page" id="section-diary">
+      <div class="section-page-header">
+        <h1>Viewing Diary</h1>
+        <p>Log what you've watched with ratings and notes</p>
+      </div>
+      <div class="diary-toolbar">
+        <button class="btn btn-primary" id="diary-add-btn">+ Add Entry</button>
+      </div>
+      <div class="diary-empty hidden" id="diary-empty">
+        <div class="empty-icon">📖</div>
+        <h3>No viewing log yet</h3>
+        <p class="text-muted">Add your first entry to start tracking what you've watched</p>
+      </div>
+      <div class="diary-list" id="diary-list">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- ── SECTION: Up Next Queue ───────────────────────────────────────────── -->
+    <div class="section-page" id="section-queue">
+      <div class="section-page-header">
+        <h1>Up Next Queue</h1>
+        <p>Your ordered watchlist — drag to reorder</p>
+      </div>
+      <div class="queue-toolbar">
+        <button class="btn btn-primary" id="queue-add-btn">+ Add to Queue</button>
+      </div>
+      <div class="queue-empty hidden" id="queue-empty">
+        <div class="empty-icon">⏭️</div>
+        <h3>Your queue is empty</h3>
+        <p class="text-muted">Add movies and shows you plan to watch next</p>
+      </div>
+      <div class="queue-list" id="queue-list">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- ── SECTION: Ratings ──────────────────────────────────────────────────── -->
+    <div class="section-page" id="section-ratings">
+      <div class="section-page-header">
+        <h1>My Ratings</h1>
+        <p>All your rated movies and shows in one place</p>
+      </div>
+      <div class="ratings-toolbar">
+        <label for="ratings-sort" class="input-label">Sort by</label>
+        <select id="ratings-sort" class="input-field">
+          <option value="date_desc">Newest First</option>
+          <option value="date_asc">Oldest First</option>
+          <option value="rating_desc">Highest Rated</option>
+          <option value="rating_asc">Lowest Rated</option>
+        </select>
+      </div>
+      <div class="ratings-empty hidden" id="ratings-empty">
+        <div class="empty-icon">⭐</div>
+        <h3>No ratings yet</h3>
+        <p class="text-muted">Rate movies and shows to build your history</p>
+      </div>
+      <div class="ratings-list" id="ratings-list">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- ── SECTION: Import Data ──────────────────────────────────────────────── -->
+    <div class="section-page" id="section-import">
+      <div class="section-page-header">
+        <h1>Import Data</h1>
+        <p>Bring your watch history from other services</p>
+      </div>
+      <div class="import-options">
+        <div class="import-card">
+          <div class="import-icon">📖</div>
+          <div class="import-info">
+            <h3>Letterboxd Export</h3>
+            <p>Import your diary, watchlist, and ratings from a Letterboxd CSV export</p>
+          </div>
+          <div class="import-action">
+            <input type="file" id="import-letterboxd" accept=".csv" hidden>
+            <button class="btn btn-primary" id="import-letterboxd-btn">Select CSV</button>
+          </div>
+        </div>
+        <div class="import-card">
+          <div class="import-icon">📥</div>
+          <div class="import-info">
+            <h3>JSON Export (CineMind)</h3>
+            <p>Import a full backup from another CineMind instance</p>
+          </div>
+          <div class="import-action">
+            <input type="file" id="import-json" accept=".json" hidden>
+            <button class="btn btn-primary" id="import-json-btn">Select JSON</button>
+          </div>
+        </div>
+        <div class="import-card">
+          <div class="import-icon">📋</div>
+          <div class="import-info">
+            <h3>Trakt Export</h3>
+            <p>Import your watchlist and history from Trakt JSON export</p>
+          </div>
+          <div class="import-action">
+            <input type="file" id="import-trakt" accept=".json" hidden>
+            <button class="btn btn-primary" id="import-trakt-btn">Select JSON</button>
+          </div>
+        </div>
+      </div>
+      <div id="import-results" style="margin-top:var(--space-xl)"></div>
+    </div>
+
+    <!-- ── SECTION: Watchlist (Legacy) ───────────────────────────────────────── -->
+    <div class="section-page" id="section-watchlist">
+      <div class="watchlist-header">
+        <div>
+          <h1 style="margin-bottom:4px">My Watchlist</h1>
+          <p class="text-muted body-sm" id="watchlist-count">0 saved</p>
+        </div>
+      </div>
+      <div class="watchlist-empty hidden" id="watchlist-empty">
+        <div class="empty-icon">🎬</div>
+        <h3>Your watchlist is empty</h3>
+        <p class="text-muted">Add movies using the ❤ button on any movie card</p>
+        <button class="btn btn-primary" style="margin-top:var(--space-lg)" data-navigate="search">
+          Browse Movies →
+        </button>
+      </div>
+      <div class="watchlist-grid" id="watchlist-grid">
         <!-- Populated by JS -->
       </div>
     </div>

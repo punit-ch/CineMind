@@ -6,6 +6,11 @@ import { initTrending } from './trending.js';
 import { initProfile } from './profile.js';
 import { initCritic, initPlanner, initComparison } from './tools.js';
 import { initTonight } from './tonight.js';
+import { initDiary } from './diary/diary.js';
+import { initQueue } from './queue/queue.js';
+import { initRatings } from './ratings/ratings.js';
+import { initImport } from './import/import.js';
+import { initLibrary } from './library/library.js';
 import { renderWatchlist, toggleWatchlist, syncWatchlistButtons } from './watchlist.js';
 import { renderHistory } from './history.js';
 import { initTv } from './tv.js';
@@ -27,6 +32,11 @@ const TITLES = {
   compare: 'Compare Films',
   watchlist: 'My Watchlist',
   history: 'History',
+  library: 'My Library',
+  diary: 'Viewing Diary',
+  queue: 'Up Next Queue',
+  ratings: 'Ratings History',
+  import: 'Data Import',
   profile: 'Taste Profile',
 };
 const sections = Object.keys(TITLES);
@@ -91,6 +101,11 @@ function initSection(section, el) {
     case 'critic': initCritic(el); break;
     case 'planner': initPlanner(el); break;
     case 'compare': initComparison(el); break;
+    case 'library': initLibrary(el); break;
+    case 'diary': initDiary(el); break;
+    case 'queue': initQueue(el); break;
+    case 'ratings': initRatings(el); break;
+    case 'import': initImport(el); break;
     case 'profile': initProfile(el); break;
     default: break; // watchlist / history render on every visit
   }
