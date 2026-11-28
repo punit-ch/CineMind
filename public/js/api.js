@@ -79,3 +79,65 @@ export const tvApi = {
   trending: (window = 'week') => apiFetch(`/tv/trending?window=${window}`),
   topRated: () => apiFetch('/tv/top-rated'),
 };
+
+// ── Library Endpoints ──────────────────────────────────────────────────────────
+export const libraryApi = {
+  get: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return apiFetch(`/library?${qs}`);
+  },
+  add: (item) => apiFetch('/library', { method: 'POST', body: JSON.stringify(item) }),
+  update: (tmdbId, mediaType, updates) =>
+    apiFetch(`/library/${tmdbId}/${mediaType}`, { method: 'PATCH', body: JSON.stringify(updates) }),
+  remove: (tmdbId, mediaType) =>
+    apiFetch(`/library/${tmdbId}/${mediaType}`, { method: 'DELETE' }),
+  stats: () => apiFetch('/library/stats'),
+};
+
+// ── Diary Endpoints ────────────────────────────────────────────────────────────
+export const diaryApi = {
+  get: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return apiFetch(`/diary?${qs}`);
+  },
+  add: (entry) => apiFetch('/diary', { method: 'POST', body: JSON.stringify(entry) }),
+  update: (id, updates) =>
+    apiFetch(`/diary/${id}`, { method: 'PATCH', body: JSON.stringify(updates) }),
+  remove: (id) => apiFetch(`/diary/${id}`, { method: 'DELETE' }),
+};
+
+// ── Queue Endpoints ────────────────────────────────────────────────────────────
+export const queueApi = {
+  get: () => apiFetch('/queue'),
+  add: (item) => apiFetch('/queue', { method: 'POST', body: JSON.stringify(item) }),
+  reorder: (items) => apiFetch('/queue/reorder', { method: 'PATCH', body: JSON.stringify({ items }) }),
+  remove: (id) => apiFetch(`/queue/${id}`, { method: 'DELETE' }),
+};
+
+// ── Ratings Endpoints ──────────────────────────────────────────────────────────
+export const ratingsApi = {
+  get: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return apiFetch(`/ratings?${qs}`);
+  },
+  add: (rating) => apiFetch('/ratings', { method: 'POST', body: JSON.stringify(rating) }),
+};
+
+// ── Import Endpoints ───────────────────────────────────────────────────────────
+export const importApi = {
+  library: (data) => apiFetch('/import/library', { method: 'POST', body: JSON.stringify(data) }),
+  diary: (data) => apiFetch('/import/diary', { method: 'POST', body: JSON.stringify(data) }),
+  ratings: (data) => apiFetch('/import/ratings', { method: 'POST', body: JSON.stringify(data) }),
+  full: (data) => apiFetch('/import/full', { method: 'POST', body: JSON.stringify(data) }),
+};
+
+// ── Auth Endpoints ─────────────────────────────────────────────────────────────
+export const authApi = {
+  signup: (data) => apiFetch('/auth/signup', { method: 'POST', body: JSON.stringify(data) }),
+  login: (data) => apiFetch('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
+  logout: () => apiFetch('/auth/logout', { method: 'POST' }),
+  refresh: () => apiFetch('/auth/refresh', { method: 'POST' }),
+  me: () => apiFetch('/auth/me'),
+  updateProfile: (data) => apiFetch('/auth/profile', { method: 'PUT', body: JSON.stringify(data) }),
+  deleteAccount: () => apiFetch('/auth/account', { method: 'DELETE' }),
+};

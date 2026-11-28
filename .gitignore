@@ -6,3 +6,10 @@ Thumbs.db
 .vscode/
 .idea/
 dist/
+.agents/
+skills-lock.json
+
+.claude/
+.github/agents/
+.github/hooks/
+.github/skills/
