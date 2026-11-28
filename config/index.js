@@ -27,6 +27,11 @@ const config = {
     posterSize: 'w500',
     backdropSize: 'w1280',
   },
+  supabase: {
+    url: process.env.SUPABASE_URL,
+    anonKey: process.env.SUPABASE_ANON_KEY,
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  },
   cache: {
     ttl: 10 * 60 * 1000, // 10 minutes in ms
   },
@@ -35,5 +40,6 @@ const config = {
 // Fail loudly (but don't crash) when keys are missing so the cause is obvious
 if (!config.gemini.apiKey) console.warn('[config] GEMINI_API_KEY is not set — AI features will fail.');
 if (!config.tmdb.apiKey) console.warn('[config] TMDB_API_KEY is not set — movie data will fail.');
+if (!config.supabase.url || !config.supabase.anonKey) console.warn('[config] Supabase not configured — auth/database will fall back to localStorage.');
 
 module.exports = config;

@@ -54,6 +54,12 @@ app.use(express.json({ limit: '16kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── API Routes ───────────────────────────────────────────────────────────────
+app.use('/api/auth', apiLimiter, require('./routes/auth'));
+app.use('/api/library', apiLimiter, require('./routes/library'));
+app.use('/api/diary', apiLimiter, require('./routes/diary'));
+app.use('/api/queue', apiLimiter, require('./routes/queue'));
+app.use('/api/ratings', apiLimiter, require('./routes/ratings'));
+app.use('/api/import', apiLimiter, require('./routes/import'));
 app.use('/api/ai', apiLimiter, aiLimiter, require('./routes/ai'));
 app.use('/api/movies', apiLimiter, require('./routes/movies'));
 app.use('/api/tv', apiLimiter, require('./routes/tv'));
