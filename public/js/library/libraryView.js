@@ -4,7 +4,7 @@ import { getLibraryStore } from './instance.js';
 import {
   LibraryError, TIMES_OF_DAY, addToQueue, removeFromQueue, moveInQueue, getQueue, logViewing, deleteDiaryEntry,
   diaryByMonth, suggestRewatch, stats, exportLibrary, parseImport, localDate, formatRating, sanitizeTitle,
-  toggleEpisode, markUpTo, setSeasonInfo, watchingShows, showProgress, seasonProgress,
+  toggleEpisode, markUpTo, setSeasonInfo, watchingShows, showProgress, seasonProgress, updateDiaryEntry,
 } from './libraryCore.js';
 
 const imgUrl = (url) => (/^https:\/\/image\.tmdb\.org\//.test(url || '') ? esc(url) : '');
@@ -60,6 +60,7 @@ export function buildDiaryEntry(entry) {
         ${extras.notes ? `<details class="lib-notes"><summary>Private notes</summary><p>${esc(extras.notes)}</p></details>` : ''}
       </div>
       <div class="lib-row__actions">
+        <button type="button" class="btn btn-ghost btn-sm" data-action="edit-entry" aria-label="Edit this diary entry for ${title}">Edit</button>
         <button type="button" class="btn btn-ghost btn-sm" data-action="delete-entry" aria-label="Delete this diary entry for ${title}">✕</button>
       </div>
     </li>`;
@@ -76,6 +77,45 @@ export function buildSearchResult(info, inQueue) {
         <button type="button" class="btn btn-primary btn-sm" data-action="log">Log</button>
       </div>
     </li>`;
+}
+
+// The log / edit form. With `entry` it is prefilled for editing.
+export function buildLogForm({ info, entry = null, rewatch = false, today, tomorrow }) {
+  const e = entry;
+  const x = e?.extras || {};
+  const rating = e && e.rating ? (e.rating / 10).toFixed(1) : '';
+  const hasExtras = Boolean(x.withWhom || x.where || x.mood || x.timeOfDay || x.notes);
+  return `
+      <form class="lib-form" id="lib-log-form" novalidate>
+        <h3 class="lib-h3">${e ? 'Edit' : 'Log'}: ${esc(info.title)}${info.year ? ` (${esc(info.year)})` : ''}</h3>
+        <div class="lib-form__grid">
+          <label class="lib-field"><span>Date watched</span>
+            <input type="date" class="input-field" name="watchedOn" value="${esc(e ? e.watchedOn : today)}" max="${esc(tomorrow)}"></label>
+          <div class="lib-field"><span>Rating <output id="lib-rating-out">${rating || 'no rating'}</output></span>
+            <div class="lib-rating-row">
+              <input type="range" name="ratingRange" min="0.1" max="10" step="0.1" value="${rating || '5'}" aria-label="Rating out of 10">
+              <input type="number" class="input-field" name="rating" min="0.1" max="10" step="0.1" value="${rating}" placeholder="–" aria-label="Rating number">
+              <button type="button" class="btn btn-ghost btn-sm" data-action="clear-rating">Clear</button>
+            </div></div>
+        </div>
+        <label class="lib-check"><input type="checkbox" name="rewatch" ${(e ? e.rewatch : rewatch) ? 'checked' : ''}> Rewatch</label>
+        <label class="lib-field"><span>Review <span class="lib-muted">(optional)</span></span>
+          <textarea class="input-field" name="review" rows="3" maxlength="4000" placeholder="A few words, or a lot">${esc(e?.review || '')}</textarea></label>
+        <details class="lib-details" ${hasExtras ? 'open' : ''}><summary>More details (private)</summary>
+          <div class="lib-form__grid">
+            <label class="lib-field"><span>Who with</span><input class="input-field" name="withWhom" maxlength="80" value="${esc(x.withWhom || '')}"></label>
+            <label class="lib-field"><span>Where</span><input class="input-field" name="where" maxlength="80" value="${esc(x.where || '')}"></label>
+            <label class="lib-field"><span>Mood</span><input class="input-field" name="mood" maxlength="40" value="${esc(x.mood || '')}"></label>
+            <label class="lib-field"><span>Time of day</span>
+              <select class="input-field" name="timeOfDay"><option value="">–</option>${TIMES_OF_DAY.map((t) => `<option ${x.timeOfDay === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+          </div>
+          <label class="lib-field"><span>Notes</span><textarea class="input-field" name="notes" rows="2" maxlength="1000">${esc(x.notes || '')}</textarea></label>
+        </details>
+        <div class="lib-form__actions">
+          <button type="submit" class="btn btn-primary">${e ? 'Save changes' : 'Save to diary'}</button>
+          <button type="button" class="btn btn-ghost" data-action="cancel-log">Cancel</button>
+        </div>
+      </form>`;
 }
 
 export function progressText(progress) {
@@ -152,7 +192,7 @@ export function initLibrary(root) {
   if (!tabsEl || !panel || !logEl || !resultsEl || !searchEl || !searchTypeEl) return;
 
   const store = getLibraryStore();
-  const state = { tab: 'movie', searchType: 'movie', results: new Map(), logging: null, episodes: null };
+  const state = { tab: 'movie', searchType: 'movie', results: new Map(), logging: null, editing: null, episodes: null };
 
   const fail = (err) => showToast(err instanceof LibraryError ? err.message : 'Something went wrong. Please try again.', 'error');
   const act = (fn) => {
@@ -251,46 +291,23 @@ export function initLibrary(root) {
   });
 
   // Log form
-  function openLogForm(info) {
+  function openLogForm(info, entry = null) {
     state.logging = info;
-    const rewatch = suggestRewatch(store.get(), info.ref);
+    state.editing = entry ? entry.id : null;
     logEl.classList.remove('hidden');
-    logEl.innerHTML = `
-      <form class="lib-form" id="lib-log-form" novalidate>
-        <h3 class="lib-h3">Log: ${esc(info.title)}${info.year ? ` (${esc(info.year)})` : ''}</h3>
-        <div class="lib-form__grid">
-          <label class="lib-field"><span>Date watched</span>
-            <input type="date" class="input-field" name="watchedOn" value="${esc(localDate())}" max="${esc(localDate(new Date(Date.now() + 86400000)))}"></label>
-          <div class="lib-field"><span>Rating <output id="lib-rating-out">no rating</output></span>
-            <div class="lib-rating-row">
-              <input type="range" name="ratingRange" min="0.1" max="10" step="0.1" value="5" aria-label="Rating out of 10">
-              <input type="number" class="input-field" name="rating" min="0.1" max="10" step="0.1" placeholder="–" aria-label="Rating number">
-              <button type="button" class="btn btn-ghost btn-sm" data-action="clear-rating">Clear</button>
-            </div></div>
-        </div>
-        <label class="lib-check"><input type="checkbox" name="rewatch" ${rewatch ? 'checked' : ''}> Rewatch</label>
-        <label class="lib-field"><span>Review <span class="lib-muted">(optional)</span></span>
-          <textarea class="input-field" name="review" rows="3" maxlength="4000" placeholder="A few words, or a lot"></textarea></label>
-        <details class="lib-details"><summary>More details (private)</summary>
-          <div class="lib-form__grid">
-            <label class="lib-field"><span>Who with</span><input class="input-field" name="withWhom" maxlength="80"></label>
-            <label class="lib-field"><span>Where</span><input class="input-field" name="where" maxlength="80"></label>
-            <label class="lib-field"><span>Mood</span><input class="input-field" name="mood" maxlength="40"></label>
-            <label class="lib-field"><span>Time of day</span>
-              <select class="input-field" name="timeOfDay"><option value="">–</option>${TIMES_OF_DAY.map((t) => `<option>${esc(t)}</option>`).join('')}</select></label>
-          </div>
-          <label class="lib-field"><span>Notes</span><textarea class="input-field" name="notes" rows="2" maxlength="1000"></textarea></label>
-        </details>
-        <div class="lib-form__actions">
-          <button type="submit" class="btn btn-primary">Save to diary</button>
-          <button type="button" class="btn btn-ghost" data-action="cancel-log">Cancel</button>
-        </div>
-      </form>`;
+    logEl.innerHTML = buildLogForm({
+      info,
+      entry,
+      rewatch: suggestRewatch(store.get(), info.ref),
+      today: localDate(),
+      tomorrow: localDate(new Date(Date.now() + 86400000)),
+    });
     logEl.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
     logEl.querySelector('[name="watchedOn"]')?.focus();
   }
   const closeLogForm = () => {
     state.logging = null;
+    state.editing = null;
     logEl.classList.add('hidden');
     logEl.innerHTML = '';
   };
@@ -327,8 +344,10 @@ export function initLibrary(root) {
       review: f.review.value,
       extras: { withWhom: f.withWhom.value, where: f.where.value, mood: f.mood.value, timeOfDay: f.timeOfDay.value, notes: f.notes.value },
     };
-    if (act((lib) => logViewing(lib, info, entry))) {
-      showToast(`Logged ${info.title}`, 'success');
+    const editingId = state.editing;
+    const saved = editingId ? act((lib) => updateDiaryEntry(lib, editingId, entry)) : act((lib) => logViewing(lib, info, entry));
+    if (saved) {
+      showToast(`${editingId ? 'Updated' : 'Logged'} ${info.title}`, 'success');
       closeLogForm();
     }
   });
@@ -354,6 +373,12 @@ export function initLibrary(root) {
       case 'log': {
         const item = lib.items[row.dataset.ref];
         if (item) openLogForm(item);
+        break;
+      }
+      case 'edit-entry': {
+        const entry = lib.diary.find((x) => x.id === row.dataset.id);
+        const item = entry && lib.items[entry.ref];
+        if (entry && item) openLogForm(item, entry);
         break;
       }
       case 'delete-entry':

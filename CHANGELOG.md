@@ -37,8 +37,17 @@
   Spoiler Shield (titles and summaries of unwatched episodes stay hidden until watched or revealed). A show moves to
   Watching when you mark its first episode and to Watched when every known episode is done. Library data format is
   now schema v2 (adds `episodes`); v1 files and previously saved data still load.
+- Edit diary entries (date, rating, review, rewatch flag and private details). Editing the rating of a title's latest
+  entry also updates the title's current rating and rating history.
 - "+ Queue" button on Tonight picks.
+- Where to watch: `GET /api/providers/:mediaType/:id?country=IN` (TMDB watch providers, provided by JustWatch, cached
+  for 6 hours) and a "Where to watch" line on every Tonight pick with a country selector (detected from the browser,
+  saved in `localStorage`) and JustWatch attribution.
 - Test helper `testing/loadEsm.js` to unit-test browser ES modules under Node.
+
+- Automated spoiler check on AI output (`services/spoilerGuard.js`): answers are scanned for spoiler-like wording,
+  retried once with a stricter instruction, and any remaining matching sentences are removed. Applies to all JSON
+  answers (including Tonight reasons) and to chat replies. Costs an extra AI call only when something is flagged.
 
 ### Changed (spoiler policy)
 - The critic prompt no longer asks for real scenes. `bestMoment` and `hiddenDetails` keep their keys but now ask for
@@ -49,5 +58,5 @@
 - Existing API routes and response shapes. Movie endpoints behave as before.
 
 ### Not done yet
-- Per-episode watch dates and ratings, editing diary entries, accounts and a database, and an automated spoiler check on AI output.
+- Per-episode watch dates and ratings, accounts and a database.
 - Merging the older Watchlist with the Library queue (they are separate for now).

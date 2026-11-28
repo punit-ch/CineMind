@@ -3,6 +3,7 @@ const llm = require('./llmClient');
 const { cleanText, cleanList } = require('../utils/validate');
 const { parseJSON, asArray } = require('../utils/aiJson');
 const { SPOILER_RULE } = require('./spoilerPolicy');
+const spoilerGuard = require('./spoilerGuard');
 
 // Delay before the single retry (tests set AI_RETRY_DELAY_MS=0)
 const RETRY_DELAY_MS = Number(process.env.AI_RETRY_DELAY_MS ?? 600);
@@ -10,8 +11,64 @@ const RETRY_DELAY_MS = Number(process.env.AI_RETRY_DELAY_MS ?? 600);
 const isRetryable = (err) =>
   err instanceof SyntaxError || [429, 500, 503].includes(err?.status);
 
+// Simple in-memory rate limiter per IP (in production, use Redis or similar)
+const AI_RATE_LIMIT = {
+  maxRequests: Number(process.env.AI_RATE_LIMIT_MAX ?? 30), // per window
+  windowMs: Number(process.env.AI_RATE_LIMIT_WINDOW_MS ?? 60 * 1000), // 1 minute
+  maxConcurrent: Number(process.env.AI_RATE_LIMIT_CONCURRENT ?? 3),
+};
+
+const rateLimitStore = new Map(); // ip -> { count, windowStart, active }
+const activeCount = { value: 0 };
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const entry = rateLimitStore.get(ip) || { count: 0, windowStart: now, active: 0 };
+
+  // Reset window if expired
+  if (now - entry.windowStart > AI_RATE_LIMIT.windowMs) {
+    entry.count = 0;
+    entry.windowStart = now;
+  }
+
+  if (entry.count >= AI_RATE_LIMIT.maxRequests) {
+    const retryAfterMs = AI_RATE_LIMIT.windowMs - (now - entry.windowStart);
+    const err = new Error('AI rate limit exceeded');
+    err.status = 429;
+    err.retryAfterMs = retryAfterMs;
+    throw err;
+  }
+
+  if (entry.active >= AI_RATE_LIMIT.maxConcurrent || activeCount.value >= AI_RATE_LIMIT.maxConcurrent * 10) {
+    const err = new Error('AI service busy, too many concurrent requests');
+    err.status = 503;
+    throw err;
+  }
+
+  entry.count += 1;
+  entry.active += 1;
+  activeCount.value += 1;
+  rateLimitStore.set(ip, entry);
+
+  return () => {
+    // Release on completion
+    entry.active = Math.max(0, entry.active - 1);
+    activeCount.value = Math.max(0, activeCount.value - 1);
+  };
+}
+
+// Periodic cleanup of stale entries
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of rateLimitStore.entries()) {
+    if (now - entry.windowStart > AI_RATE_LIMIT.windowMs * 2) {
+      rateLimitStore.delete(ip);
+    }
+  }
+}, AI_RATE_LIMIT.windowMs).unref();
+
 // Call Gemini and parse JSON, retrying once on parse errors / transient failures
-async function generateJSON(prompt) {
+async function generateJSONOnce(prompt) {
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -23,6 +80,25 @@ async function generateJSON(prompt) {
     }
   }
   throw lastErr;
+}
+
+// generateJSONOnce plus the spoiler safety net: if the answer looks like it spoils something, ask once more with a
+// stricter instruction, then remove whatever still matches. See services/spoilerGuard.js.
+async function generateJSON(prompt) {
+  let data = await generateJSONOnce(prompt);
+  if (spoilerGuard.hasRisk(data)) {
+    try {
+      const again = await generateJSONOnce(`${prompt}\n\n${spoilerGuard.STRICT_REMINDER}`);
+      if (!spoilerGuard.hasRisk(again)) return again;
+      data = again;
+    } catch {
+      // keep the first answer and scrub it below
+    }
+    const { value, removed } = spoilerGuard.scrub(data);
+    if (removed) console.warn(`[spoiler-guard] removed ${removed} sentence(s) from an AI answer`);
+    return value;
+  }
+  return data;
 }
 
 const geminiService = {
@@ -167,7 +243,18 @@ Format movie titles in *asterisks* for emphasis.
 ${SPOILER_RULE}
 If the user asks for spoilers, politely decline and offer a spoiler-free alternative instead.`;
 
-    return llm.chat(messages, systemInstruction);
+    let reply = await llm.chat(messages, systemInstruction);
+    if (spoilerGuard.hasRisk(reply)) {
+      try {
+        reply = await llm.chat(messages, `${systemInstruction}\n\n${spoilerGuard.STRICT_REMINDER}`);
+      } catch {
+        // keep the first reply and scrub it below
+      }
+      const { value, removed } = spoilerGuard.scrub(reply);
+      if (removed) console.warn(`[spoiler-guard] removed ${removed} sentence(s) from a chat reply`);
+      reply = value.trim() || spoilerGuard.FALLBACK_REPLY;
+    }
+    return reply;
   },
 
   // Tonight flow: choose from a fixed list of REAL titles (never invents titles).
@@ -278,3 +365,5 @@ Return JSON in this shape:
 };
 
 module.exports = geminiService;
+module.exports.checkRateLimit = checkRateLimit;
+module.exports.AI_RATE_LIMIT = AI_RATE_LIMIT;

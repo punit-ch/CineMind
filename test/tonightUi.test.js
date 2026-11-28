@@ -12,6 +12,7 @@ const read = (file) => fs.readFileSync(path.join(__dirname, '..', 'public', 'js'
 const ui = loadEsm('ui.js');
 const logic = loadEsm('tonightLogic.js');
 const libraryCore = loadEsm('library/libraryCore.js');
+const providers = loadEsm('providers.js');
 const view = loadEsm('tonight.js', {
   aiApi: {},
   esc: ui.esc,
@@ -20,6 +21,7 @@ const view = loadEsm('tonight.js', {
   syncWatchlistButtons() {},
   getLibraryStore() {},
   ...libraryCore,
+  ...providers,
   ...logic,
 });
 
@@ -119,6 +121,11 @@ test('queue button data works with the library core (a pick can be queued as is)
   assert.equal(lib.items['tv:21'].title, 'The Wire');
 });
 
+test('every card has a where-to-watch slot keyed by its ref', () => {
+  assert.ok(view.buildTonightCard(moviePick).includes('data-where="movie:11"'));
+  assert.ok(view.buildTonightCard({ ...moviePick, id: 7, mediaType: 'tv' }).includes('data-where="tv:7"'));
+});
+
 test('unsafe poster URLs are not rendered as images', () => {
   const html = view.buildTonightCard({ ...moviePick, poster: 'javascript:alert(1)' });
   assert.ok(!html.includes('<img'));
@@ -136,6 +143,7 @@ test('every element id used by tonight.js exists in the dashboard section markup
   const script = fs.readFileSync(patchScript, 'utf8');
   const used = new Set((read('tonight.js').match(/#(tonight-[a-z-]+)/g) || []).map((s) => s.slice(1)));
   used.delete('tonight-retry'); // created at runtime by the error state
+  used.delete('tonight-country'); // created at runtime by initTonight
   assert.ok(used.size >= 7);
   for (const id of used) assert.ok(script.includes(`id="${id}"`), `dashboard markup is missing #${id}`);
 });

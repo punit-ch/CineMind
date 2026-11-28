@@ -1,0 +1,1401 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 5b91a06..effeb72 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -37,9 +37,18 @@
+   Spoiler Shield (titles and summaries of unwatched episodes stay hidden until watched or revealed). A show moves to
+   Watching when you mark its first episode and to Watched when every known episode is done. Library data format is
+   now schema v2 (adds `episodes`); v1 files and previously saved data still load.
++- Edit diary entries (date, rating, review, rewatch flag and private details). Editing the rating of a title's latest
++  entry also updates the title's current rating and rating history.
+ - "+ Queue" button on Tonight picks.
++- Where to watch: `GET /api/providers/:mediaType/:id?country=IN` (TMDB watch providers, provided by JustWatch, cached
++  for 6 hours) and a "Where to watch" line on every Tonight pick with a country selector (detected from the browser,
++  saved in `localStorage`) and JustWatch attribution.
+ - Test helper `testing/loadEsm.js` to unit-test browser ES modules under Node.
+ 
++- Automated spoiler check on AI output (`services/spoilerGuard.js`): answers are scanned for spoiler-like wording,
++  retried once with a stricter instruction, and any remaining matching sentences are removed. Applies to all JSON
++  answers (including Tonight reasons) and to chat replies. Costs an extra AI call only when something is flagged.
++
+ ### Changed (spoiler policy)
+ - The critic prompt no longer asks for real scenes. `bestMoment` and `hiddenDetails` keep their keys but now ask for
+   spoiler-free content, so the frontend does not need changes.
+@@ -49,5 +58,5 @@
+ - Existing API routes and response shapes. Movie endpoints behave as before.
+ 
+ ### Not done yet
+-- Per-episode watch dates and ratings, editing diary entries, accounts and a database, and an automated spoiler check on AI output.
++- Per-episode watch dates and ratings, accounts and a database.
+ - Merging the older Watchlist with the Library queue (they are separate for now).
+diff --git a/README.md b/README.md
+index 27418f7..75302ae 100644
+--- a/README.md
++++ b/README.md
+@@ -23,7 +23,7 @@ Recommendations (taste form + mood) · Tonight (three spoiler-free picks for rig
+ Watchlist, history, taste-profile cache and the Library are stored in the browser (`localStorage`); there are no user accounts.
+ 
+ ### Library
+-Separate film and TV queues (drag or use the arrows to rank), TV episode tracking with a Spoiler Shield (hidden titles for unwatched episodes), a viewing diary (date, rating out of 10 with decimals,
++Separate film and TV queues (drag or use the arrows to rank), TV episode tracking with a Spoiler Shield (hidden titles for unwatched episodes), a viewing diary that you can edit (date, rating out of 10 with decimals,
+ review, rewatch flag, and private details such as who with, where, mood and notes), simple stats, and JSON
+ export/import (merge or replace). Data lives only in this browser, so export regularly. The export format is versioned
+ (`version: 2`) and is designed to import into a database later.
+@@ -38,7 +38,7 @@ export/import (merge or replace). Data lives only in this browser, so export reg
+ | `ALLOWED_ORIGIN` | CORS origin in production |
+ 
+ ## API
+-`GET /api/health` · `GET /api/movies/{search,trending,top-rated,genres/:id,:id,:id/similar}` · `GET /api/tv/{search,trending,top-rated,:id,:id/seasons/:season}` · `POST /api/ai/{recommend,mood,tonight,critic,plan,chat,profile,compare}`
++`GET /api/health` · `GET /api/movies/{search,trending,top-rated,genres/:id,:id,:id/similar}` · `GET /api/tv/{search,trending,top-rated,:id,:id/seasons/:season}` · `GET /api/providers/:mediaType/:id?country=IN` · `POST /api/ai/{recommend,mood,tonight,critic,plan,chat,profile,compare}`
+ 
+ ### Tonight (`POST /api/ai/tonight`)
+ Picks three real titles for tonight. Candidates come from TMDB (filtered by mood, time available and type), the AI
+@@ -51,6 +51,15 @@ only re-ranks and explains them, and if the AI is unavailable the endpoint falls
+ (each with `reason`, `tonightFit` and `source` of `ai` or `fallback`), the overall `source`, and `candidatesConsidered`.
+ Overviews are left out on purpose, because they can contain spoilers.
+ 
++### Where to watch
++Tonight picks show where each title streams in your country (Stream, Free, Free with ads, Rent, Buy). The country is
++detected from your browser and can be changed on the Tonight page. Availability comes from TMDB's watch-provider data,
++which is provided by JustWatch, so the app shows JustWatch attribution next to it. TMDB's terms for the free API key
++cover non-commercial use only; ads or paid plans need a separate TMDB agreement.
++
+ ## Spoiler-free AI
+-Every AI prompt carries a strict no-spoilers rule (`services/spoilerPolicy.js`). This reduces spoiler risk, but language
+-models cannot guarantee zero spoilers.
++Every AI prompt carries a strict no-spoilers rule (`services/spoilerPolicy.js`), and every answer is checked
++afterwards (`services/spoilerGuard.js`). The check looks for wording that usually signals a spoiler (deaths, twists,
++reveals, endings, who is responsible). If it finds some, the AI is asked once more with a stricter instruction, and
++any sentence that still matches is removed. Title fields are skipped. This is a heuristic: it lowers the risk, it can
++drop harmless sentences, and it cannot guarantee zero spoilers.
+diff --git a/controllers/providersController.js b/controllers/providersController.js
+new file mode 100644
+index 0000000..ec6e269
+--- /dev/null
++++ b/controllers/providersController.js
+@@ -0,0 +1,30 @@
++// controllers/providersController.js — where to watch
++const tmdbService = require('../services/tmdbService');
++const { HttpError } = require('../utils/validate');
++
++const EMPTY = { stream: [], free: [], ads: [], rent: [], buy: [] };
++
++const providersController = {
++  // GET /api/providers/:mediaType/:id?country=IN
++  async get(req, res) {
++    const { mediaType, id } = req.params;
++    if (!['movie', 'tv'].includes(mediaType)) throw new HttpError(400, "mediaType must be 'movie' or 'tv'");
++    if (!/^\d+$/.test(String(id))) throw new HttpError(400, 'Invalid ID');
++    const country = String(req.query.country || 'US').toUpperCase();
++    if (!/^[A-Z]{2}$/.test(country)) throw new HttpError(400, 'country must be a two-letter code such as IN or US');
++
++    const all = await tmdbService.getWatchProviders(mediaType, parseInt(id, 10));
++    const here = all[country];
++    const available = Boolean(here && ['stream', 'free', 'ads', 'rent', 'buy'].some((k) => here[k].length));
++    res.json({
++      country,
++      available,
++      link: here?.link || null,
++      ...EMPTY,
++      ...(here ? { stream: here.stream, free: here.free, ads: here.ads, rent: here.rent, buy: here.buy } : {}),
++      attribution: 'JustWatch',
++    });
++  },
++};
++
++module.exports = providersController;
+diff --git a/public/css/tonight.css b/public/css/tonight.css
+index 274b224..2d0702b 100644
+--- a/public/css/tonight.css
++++ b/public/css/tonight.css
+@@ -72,3 +72,17 @@
+ @media (prefers-reduced-motion: reduce) {
+   .tonight-seg, .tonight-chip { transition: none; }
+ }
++
++/* Where to watch */
++.tonight-country { max-width: 860px; margin: 0 0 var(--space-md, 16px); font-size: 0.875rem; color: var(--text-secondary, #b3b3b3); }
++.tonight-country label { display: inline-flex; align-items: center; gap: 8px; }
++.tonight-country select { width: auto; padding: 6px 10px; }
++.tonight-attrib { max-width: 860px; margin: var(--space-md, 16px) 0 0; }
++.tonight-attrib a { color: inherit; text-decoration: underline; }
++.tonight-card__where { display: flex; flex-direction: column; gap: 6px; font-size: 0.8125rem; }
++.where__group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
++.where__label { color: var(--text-muted, #8a8a8a); min-width: 5.5em; }
++.where__chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 4px; border-radius: 999px; border: 1px solid var(--border, rgba(255,255,255,.15)); color: var(--text-primary, #fff); }
++.where__logo { width: 18px; height: 18px; border-radius: 4px; object-fit: cover; }
++.where__more, .where__none { color: var(--text-muted, #8a8a8a); }
++.where__link { color: var(--text-secondary, #b3b3b3); text-decoration: underline; width: fit-content; }
+diff --git a/public/js/library/libraryCore.js b/public/js/library/libraryCore.js
+index 2fa18d2..7340ddb 100644
+--- a/public/js/library/libraryCore.js
++++ b/public/js/library/libraryCore.js
+@@ -223,6 +223,29 @@ export function logViewing(lib, rawTitle, entry = {}, { now = new Date(), idFn =
+   return { lib: { ...next, diary: [...next.diary, record] }, entry: record };
+ }
+ 
++// Edit a diary entry (only the fields given change). If it is the latest entry for its title and the rating changed,
++// the title's current rating follows it.
++export function updateDiaryEntry(lib, id, changes = {}, { now = new Date() } = {}) {
++  const current = lib.diary.find((e) => e.id === id);
++  if (!current) throw new LibraryError('Diary entry not found');
++  const has = (key) => Object.prototype.hasOwnProperty.call(changes, key);
++  const record = {
++    ...current,
++    watchedOn: normalizeDate(changes.watchedOn || current.watchedOn, now),
++    rating: has('rating') ? toTenths(changes.rating) : current.rating,
++    review: has('review') ? cleanMultiline(changes.review, LIMITS.review) : current.review,
++    rewatch: has('rewatch') ? Boolean(changes.rewatch) : current.rewatch,
++    extras: has('extras') ? cleanExtras({ ...current.extras, ...changes.extras }) : current.extras,
++  };
++  let next = { ...lib, diary: lib.diary.map((e) => (e.id === id ? record : e)) };
++  const sameTitle = next.diary.filter((e) => e.ref === record.ref);
++  const latest = sameTitle.reduce((a, b) => (b.watchedOn > a.watchedOn || (b.watchedOn === a.watchedOn && b.createdAt > a.createdAt) ? b : a));
++  if (latest.id === id && record.rating !== current.rating && next.items[record.ref]) {
++    next = rateTitle(next, record.ref, record.rating, now);
++  }
++  return next;
++}
++
+ export const deleteDiaryEntry = (lib, id) => ({ ...lib, diary: lib.diary.filter((e) => e.id !== id) });
+ 
+ // Newest first, grouped by month ("2026-11"), each entry carrying its title info
+diff --git a/public/js/library/libraryView.js b/public/js/library/libraryView.js
+index 39af2ea..54f7487 100644
+--- a/public/js/library/libraryView.js
++++ b/public/js/library/libraryView.js
+@@ -4,7 +4,7 @@ import { getLibraryStore } from './instance.js';
+ import {
+   LibraryError, TIMES_OF_DAY, addToQueue, removeFromQueue, moveInQueue, getQueue, logViewing, deleteDiaryEntry,
+   diaryByMonth, suggestRewatch, stats, exportLibrary, parseImport, localDate, formatRating, sanitizeTitle,
+-  toggleEpisode, markUpTo, setSeasonInfo, watchingShows, showProgress, seasonProgress,
++  toggleEpisode, markUpTo, setSeasonInfo, watchingShows, showProgress, seasonProgress, updateDiaryEntry,
+ } from './libraryCore.js';
+ 
+ const imgUrl = (url) => (/^https:\/\/image\.tmdb\.org\//.test(url || '') ? esc(url) : '');
+@@ -60,6 +60,7 @@ export function buildDiaryEntry(entry) {
+         ${extras.notes ? `<details class="lib-notes"><summary>Private notes</summary><p>${esc(extras.notes)}</p></details>` : ''}
+       </div>
+       <div class="lib-row__actions">
++        <button type="button" class="btn btn-ghost btn-sm" data-action="edit-entry" aria-label="Edit this diary entry for ${title}">Edit</button>
+         <button type="button" class="btn btn-ghost btn-sm" data-action="delete-entry" aria-label="Delete this diary entry for ${title}">✕</button>
+       </div>
+     </li>`;
+@@ -78,6 +79,45 @@ export function buildSearchResult(info, inQueue) {
+     </li>`;
+ }
+ 
++// The log / edit form. With `entry` it is prefilled for editing.
++export function buildLogForm({ info, entry = null, rewatch = false, today, tomorrow }) {
++  const e = entry;
++  const x = e?.extras || {};
++  const rating = e && e.rating ? (e.rating / 10).toFixed(1) : '';
++  const hasExtras = Boolean(x.withWhom || x.where || x.mood || x.timeOfDay || x.notes);
++  return `
++      <form class="lib-form" id="lib-log-form" novalidate>
++        <h3 class="lib-h3">${e ? 'Edit' : 'Log'}: ${esc(info.title)}${info.year ? ` (${esc(info.year)})` : ''}</h3>
++        <div class="lib-form__grid">
++          <label class="lib-field"><span>Date watched</span>
++            <input type="date" class="input-field" name="watchedOn" value="${esc(e ? e.watchedOn : today)}" max="${esc(tomorrow)}"></label>
++          <div class="lib-field"><span>Rating <output id="lib-rating-out">${rating || 'no rating'}</output></span>
++            <div class="lib-rating-row">
++              <input type="range" name="ratingRange" min="0.1" max="10" step="0.1" value="${rating || '5'}" aria-label="Rating out of 10">
++              <input type="number" class="input-field" name="rating" min="0.1" max="10" step="0.1" value="${rating}" placeholder="–" aria-label="Rating number">
++              <button type="button" class="btn btn-ghost btn-sm" data-action="clear-rating">Clear</button>
++            </div></div>
++        </div>
++        <label class="lib-check"><input type="checkbox" name="rewatch" ${(e ? e.rewatch : rewatch) ? 'checked' : ''}> Rewatch</label>
++        <label class="lib-field"><span>Review <span class="lib-muted">(optional)</span></span>
++          <textarea class="input-field" name="review" rows="3" maxlength="4000" placeholder="A few words, or a lot">${esc(e?.review || '')}</textarea></label>
++        <details class="lib-details" ${hasExtras ? 'open' : ''}><summary>More details (private)</summary>
++          <div class="lib-form__grid">
++            <label class="lib-field"><span>Who with</span><input class="input-field" name="withWhom" maxlength="80" value="${esc(x.withWhom || '')}"></label>
++            <label class="lib-field"><span>Where</span><input class="input-field" name="where" maxlength="80" value="${esc(x.where || '')}"></label>
++            <label class="lib-field"><span>Mood</span><input class="input-field" name="mood" maxlength="40" value="${esc(x.mood || '')}"></label>
++            <label class="lib-field"><span>Time of day</span>
++              <select class="input-field" name="timeOfDay"><option value="">–</option>${TIMES_OF_DAY.map((t) => `<option ${x.timeOfDay === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
++          </div>
++          <label class="lib-field"><span>Notes</span><textarea class="input-field" name="notes" rows="2" maxlength="1000">${esc(x.notes || '')}</textarea></label>
++        </details>
++        <div class="lib-form__actions">
++          <button type="submit" class="btn btn-primary">${e ? 'Save changes' : 'Save to diary'}</button>
++          <button type="button" class="btn btn-ghost" data-action="cancel-log">Cancel</button>
++        </div>
++      </form>`;
++}
++
+ export function progressText(progress) {
+   if (!progress.watched) return 'Not started';
+   const base = progress.total ? `${progress.watched} of ${progress.total} watched` : `${progress.watched} watched`;
+@@ -152,7 +192,7 @@ export function initLibrary(root) {
+   if (!tabsEl || !panel || !logEl || !resultsEl || !searchEl || !searchTypeEl) return;
+ 
+   const store = getLibraryStore();
+-  const state = { tab: 'movie', searchType: 'movie', results: new Map(), logging: null, episodes: null };
++  const state = { tab: 'movie', searchType: 'movie', results: new Map(), logging: null, editing: null, episodes: null };
+ 
+   const fail = (err) => showToast(err instanceof LibraryError ? err.message : 'Something went wrong. Please try again.', 'error');
+   const act = (fn) => {
+@@ -251,46 +291,23 @@ export function initLibrary(root) {
+   });
+ 
+   // Log form
+-  function openLogForm(info) {
++  function openLogForm(info, entry = null) {
+     state.logging = info;
+-    const rewatch = suggestRewatch(store.get(), info.ref);
++    state.editing = entry ? entry.id : null;
+     logEl.classList.remove('hidden');
+-    logEl.innerHTML = `
+-      <form class="lib-form" id="lib-log-form" novalidate>
+-        <h3 class="lib-h3">Log: ${esc(info.title)}${info.year ? ` (${esc(info.year)})` : ''}</h3>
+-        <div class="lib-form__grid">
+-          <label class="lib-field"><span>Date watched</span>
+-            <input type="date" class="input-field" name="watchedOn" value="${esc(localDate())}" max="${esc(localDate(new Date(Date.now() + 86400000)))}"></label>
+-          <div class="lib-field"><span>Rating <output id="lib-rating-out">no rating</output></span>
+-            <div class="lib-rating-row">
+-              <input type="range" name="ratingRange" min="0.1" max="10" step="0.1" value="5" aria-label="Rating out of 10">
+-              <input type="number" class="input-field" name="rating" min="0.1" max="10" step="0.1" placeholder="–" aria-label="Rating number">
+-              <button type="button" class="btn btn-ghost btn-sm" data-action="clear-rating">Clear</button>
+-            </div></div>
+-        </div>
+-        <label class="lib-check"><input type="checkbox" name="rewatch" ${rewatch ? 'checked' : ''}> Rewatch</label>
+-        <label class="lib-field"><span>Review <span class="lib-muted">(optional)</span></span>
+-          <textarea class="input-field" name="review" rows="3" maxlength="4000" placeholder="A few words, or a lot"></textarea></label>
+-        <details class="lib-details"><summary>More details (private)</summary>
+-          <div class="lib-form__grid">
+-            <label class="lib-field"><span>Who with</span><input class="input-field" name="withWhom" maxlength="80"></label>
+-            <label class="lib-field"><span>Where</span><input class="input-field" name="where" maxlength="80"></label>
+-            <label class="lib-field"><span>Mood</span><input class="input-field" name="mood" maxlength="40"></label>
+-            <label class="lib-field"><span>Time of day</span>
+-              <select class="input-field" name="timeOfDay"><option value="">–</option>${TIMES_OF_DAY.map((t) => `<option>${esc(t)}</option>`).join('')}</select></label>
+-          </div>
+-          <label class="lib-field"><span>Notes</span><textarea class="input-field" name="notes" rows="2" maxlength="1000"></textarea></label>
+-        </details>
+-        <div class="lib-form__actions">
+-          <button type="submit" class="btn btn-primary">Save to diary</button>
+-          <button type="button" class="btn btn-ghost" data-action="cancel-log">Cancel</button>
+-        </div>
+-      </form>`;
++    logEl.innerHTML = buildLogForm({
++      info,
++      entry,
++      rewatch: suggestRewatch(store.get(), info.ref),
++      today: localDate(),
++      tomorrow: localDate(new Date(Date.now() + 86400000)),
++    });
+     logEl.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+     logEl.querySelector('[name="watchedOn"]')?.focus();
+   }
+   const closeLogForm = () => {
+     state.logging = null;
++    state.editing = null;
+     logEl.classList.add('hidden');
+     logEl.innerHTML = '';
+   };
+@@ -327,8 +344,10 @@ export function initLibrary(root) {
+       review: f.review.value,
+       extras: { withWhom: f.withWhom.value, where: f.where.value, mood: f.mood.value, timeOfDay: f.timeOfDay.value, notes: f.notes.value },
+     };
+-    if (act((lib) => logViewing(lib, info, entry))) {
+-      showToast(`Logged ${info.title}`, 'success');
++    const editingId = state.editing;
++    const saved = editingId ? act((lib) => updateDiaryEntry(lib, editingId, entry)) : act((lib) => logViewing(lib, info, entry));
++    if (saved) {
++      showToast(`${editingId ? 'Updated' : 'Logged'} ${info.title}`, 'success');
+       closeLogForm();
+     }
+   });
+@@ -356,6 +375,12 @@ export function initLibrary(root) {
+         if (item) openLogForm(item);
+         break;
+       }
++      case 'edit-entry': {
++        const entry = lib.diary.find((x) => x.id === row.dataset.id);
++        const item = entry && lib.items[entry.ref];
++        if (entry && item) openLogForm(item, entry);
++        break;
++      }
+       case 'delete-entry':
+         if (window.confirm('Delete this diary entry? The title stays in your library.')) act((l) => deleteDiaryEntry(l, row.dataset.id));
+         break;
+diff --git a/public/js/providers.js b/public/js/providers.js
+new file mode 100644
+index 0000000..18520a0
+--- /dev/null
++++ b/public/js/providers.js
+@@ -0,0 +1,87 @@
++// public/js/providers.js — "Where to watch" helpers. Availability data comes from TMDB's watch-provider
++// endpoint, which is provided by JustWatch and requires attribution wherever it is shown.
++const COUNTRY_KEY = 'cinemind_country';
++
++export const COUNTRIES = [
++  ['IN', 'India'], ['US', 'United States'], ['GB', 'United Kingdom'], ['CA', 'Canada'], ['AU', 'Australia'],
++  ['NZ', 'New Zealand'], ['IE', 'Ireland'], ['DE', 'Germany'], ['FR', 'France'], ['ES', 'Spain'], ['IT', 'Italy'],
++  ['NL', 'Netherlands'], ['SE', 'Sweden'], ['BR', 'Brazil'], ['MX', 'Mexico'], ['JP', 'Japan'], ['KR', 'South Korea'],
++  ['SG', 'Singapore'], ['AE', 'United Arab Emirates'], ['ZA', 'South Africa'], ['PK', 'Pakistan'],
++  ['BD', 'Bangladesh'], ['LK', 'Sri Lanka'], ['NP', 'Nepal'],
++];
++
++export const ATTRIBUTION_HTML =
++  'Streaming availability by <a href="https://www.justwatch.com" target="_blank" rel="noopener noreferrer">JustWatch</a>';
++
++const GROUPS = [['stream', 'Stream'], ['free', 'Free'], ['ads', 'Free with ads'], ['rent', 'Rent'], ['buy', 'Buy']];
++const PER_GROUP = 5;
++
++const TIMEZONE_COUNTRIES = { 'Asia/Kolkata': 'IN', 'Asia/Calcutta': 'IN', 'Europe/London': 'GB', 'Australia/Sydney': 'AU' };
++
++const esc = (value) =>
++  String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
++
++export const isCountryCode = (value) => /^[A-Z]{2}$/.test(String(value));
++
++// Best guess from the browser: a language region ("en-IN") first, then the time zone, else the US
++export function detectCountry({ languages = [], timeZone = '' } = {}) {
++  for (const lang of languages) {
++    const m = /^[a-z]{2,3}[-_]([A-Za-z]{2})(?:$|[-_])/.exec(String(lang));
++    if (m) return m[1].toUpperCase();
++  }
++  return TIMEZONE_COUNTRIES[timeZone] || 'US';
++}
++
++// The saved country (storage is injected), otherwise the detected one
++export function getCountry(storage, env) {
++  try {
++    const saved = storage.getItem(COUNTRY_KEY);
++    if (isCountryCode(saved)) return saved;
++  } catch { /* storage unavailable */ }
++  return detectCountry(env);
++}
++
++export function saveCountry(storage, code) {
++  if (!isCountryCode(code)) return;
++  try {
++    storage.setItem(COUNTRY_KEY, code);
++  } catch { /* ignore */ }
++}
++
++export function countryOptionsHtml(selected) {
++  const list = COUNTRIES.some(([code]) => code === selected) ? COUNTRIES : [[selected, `Other (${selected})`], ...COUNTRIES];
++  return list.map(([code, name]) => `<option value="${esc(code)}" ${code === selected ? 'selected' : ''}>${esc(name)}</option>`).join('');
++}
++
++const safeLogo = (url) => (/^https:\/\/image\.tmdb\.org\//.test(url || '') ? esc(url) : '');
++const safeLink = (url) => (/^https:\/\/(www\.)?(themoviedb\.org|justwatch\.com)\//.test(url || '') ? esc(url) : '');
++
++// HTML for one title's availability, from GET /api/providers/:mediaType/:id
++export function buildProviders(data) {
++  if (!data || !data.available) {
++    return `<span class="where__none">Not listed on streaming services in ${esc(data?.country || 'your country')}.</span>`;
++  }
++  const groups = GROUPS.filter(([key]) => Array.isArray(data[key]) && data[key].length).map(([key, label]) => {
++    const list = data[key];
++    const chips = list.slice(0, PER_GROUP).map((p) => {
++      const logo = safeLogo(p.logo);
++      return `<span class="where__chip">${logo ? `<img class="where__logo" src="${logo}" alt="" loading="lazy">` : ''}${esc(p.name)}</span>`;
++    });
++    if (list.length > PER_GROUP) chips.push(`<span class="where__more">+${list.length - PER_GROUP} more</span>`);
++    return `<div class="where__group"><span class="where__label">${esc(label)}</span>${chips.join('')}</div>`;
++  });
++  const link = safeLink(data.link);
++  return `${groups.join('')}${link ? `<a class="where__link" href="${link}" target="_blank" rel="noopener noreferrer">All options ↗</a>` : ''}`;
++}
++
++// Fetch availability (cached in memory for the page's lifetime)
++const memo = new Map();
++export async function fetchProviders(mediaType, id, country, fetchFn = fetch) {
++  const key = `${mediaType}:${id}:${country}`;
++  if (memo.has(key)) return memo.get(key);
++  const res = await fetchFn(`/api/providers/${encodeURIComponent(mediaType)}/${encodeURIComponent(id)}?country=${encodeURIComponent(country)}`);
++  const data = await res.json().catch(() => ({}));
++  if (!res.ok) throw new Error(data.error || 'Could not load availability');
++  memo.set(key, data);
++  return data;
++}
+diff --git a/public/js/tonight.js b/public/js/tonight.js
+index ddc740a..5046625 100644
+--- a/public/js/tonight.js
++++ b/public/js/tonight.js
+@@ -4,6 +4,7 @@ import { esc, showToast, setLoading } from './ui.js';
+ import { syncWatchlistButtons } from './watchlist.js';
+ import { getLibraryStore } from './library/instance.js';
+ import { addToQueue, LibraryError } from './library/libraryCore.js';
++import { ATTRIBUTION_HTML, getCountry, saveCountry, countryOptionsHtml, buildProviders, fetchProviders } from './providers.js';
+ import {
+   TYPES, TIMES, MOODS, buildRequest, nextPage, refOf, sourceLabel, tmdbUrl, movieData, loadPrefs, savePrefs,
+ } from './tonightLogic.js';
+@@ -43,6 +44,7 @@ export function buildTonightCard(pick, index = 0, queued = false) {
+           ${pick.tonightFit ? `<span class="tonight-card__fit">${esc(pick.tonightFit)}</span>` : ''}
+           <span class="tonight-card__source tonight-card__source--${pick.source === 'ai' ? 'ai' : 'top'}">${esc(sourceLabel(pick.source))}</span>
+         </div>
++        <div class="tonight-card__where" data-where="${esc(refOf(pick))}"><span class="where__none">Checking where to watch…</span></div>
+         <div class="tonight-card__actions">
+           <button type="button" class="btn btn-primary btn-sm" data-queue-ref="${esc(refOf(pick))}" ${queued ? 'disabled' : ''}>${queued ? 'In queue' : '+ Queue'}</button>
+           ${isTv
+@@ -71,6 +73,18 @@ export function initTonight(root) {
+   if (!typeEl || !timeEl || !moodsEl || !moodInput || !goBtn || !againBtn || !results) return;
+ 
+   const prefs = loadPrefs(window.localStorage);
++  let country = getCountry(window.localStorage, {
++    languages: window.navigator?.languages || [],
++    timeZone: (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return ''; } })(),
++  });
++  const countryBar = document.createElement('div');
++  countryBar.className = 'tonight-country';
++  countryBar.innerHTML = `<label>Where to watch in <select id="tonight-country" class="input-field">${countryOptionsHtml(country)}</select></label>`;
++  results.parentNode?.insertBefore(countryBar, results);
++  const attribution = document.createElement('p');
++  attribution.className = 'tonight-attrib text-muted body-sm hidden';
++  attribution.innerHTML = ATTRIBUTION_HTML;
++  results.parentNode?.insertBefore(attribution, moreEl);
+   const state = { page: 1, shown: [], loading: false, request: 0, picks: new Map() };
+   const store = getLibraryStore();
+   const queuedRefs = () => new Set([...store.get().queue.movie, ...store.get().queue.tv].map((q) => q.ref));
+@@ -125,6 +139,30 @@ export function initTonight(root) {
+     moreEl.classList.add('hidden');
+   };
+ 
++  // Fill each card's availability line (separate requests, so a slow one never blocks the picks)
++  async function fillProviders() {
++    const token = state.request;
++    const target = country;
++    for (const pick of state.picks.values()) {
++      const slot = results.querySelector(`[data-where="${refOf(pick)}"]`);
++      if (!slot) continue;
++      slot.innerHTML = '<span class="where__none">Checking where to watch…</span>';
++      fetchProviders(pick.mediaType === 'tv' ? 'tv' : 'movie', pick.id, target)
++        .then((data) => {
++          if (token === state.request && target === country) slot.innerHTML = buildProviders(data);
++        })
++        .catch(() => {
++          if (token === state.request && target === country) slot.innerHTML = '<span class="where__none">Availability is not available right now.</span>';
++        });
++    }
++  }
++
++  countryBar.querySelector('#tonight-country')?.addEventListener('change', (e) => {
++    country = e.target.value;
++    saveCountry(window.localStorage, country);
++    if (state.picks.size) fillProviders();
++  });
++
+   async function run(fresh) {
+     if (state.loading) return;
+     state.loading = true;
+@@ -158,6 +196,8 @@ export function initTonight(root) {
+       results.innerHTML = data.picks.map((p, i) => buildTonightCard(p, i, queued.has(refOf(p)))).join('');
+       syncWatchlistButtons(results);
+       moreEl.classList.remove('hidden');
++      attribution.classList.remove('hidden');
++      fillProviders();
+       if (data.source === 'fallback') {
+         showToast('The AI is busy, so these are top-rated matches for your filters.', 'info', 4500);
+       }
+diff --git a/routes/providers.js b/routes/providers.js
+new file mode 100644
+index 0000000..66f9ae3
+--- /dev/null
++++ b/routes/providers.js
+@@ -0,0 +1,11 @@
++// routes/providers.js
++const express = require('express');
++const router = express.Router();
++const providersController = require('../controllers/providersController');
++
++const asyncHandler = (fn) => (req, res, next) =>
++  Promise.resolve(fn(req, res, next)).catch(next);
++
++router.get('/:mediaType/:id', asyncHandler(providersController.get));
++
++module.exports = router;
+diff --git a/server.js b/server.js
+index 15a3a8b..005cef1 100644
+--- a/server.js
++++ b/server.js
+@@ -57,6 +57,7 @@ app.use(express.static(path.join(__dirname, 'public')));
+ app.use('/api/ai', apiLimiter, aiLimiter, require('./routes/ai'));
+ app.use('/api/movies', apiLimiter, require('./routes/movies'));
+ app.use('/api/tv', apiLimiter, require('./routes/tv'));
++app.use('/api/providers', apiLimiter, require('./routes/providers'));
+ 
+ app.get('/api/health', (req, res) => {
+   res.json({
+diff --git a/services/geminiService.js b/services/geminiService.js
+index c2125d6..1f68c8e 100644
+--- a/services/geminiService.js
++++ b/services/geminiService.js
+@@ -3,6 +3,7 @@ const llm = require('./llmClient');
+ const { cleanText, cleanList } = require('../utils/validate');
+ const { parseJSON, asArray } = require('../utils/aiJson');
+ const { SPOILER_RULE } = require('./spoilerPolicy');
++const spoilerGuard = require('./spoilerGuard');
+ 
+ // Delay before the single retry (tests set AI_RETRY_DELAY_MS=0)
+ const RETRY_DELAY_MS = Number(process.env.AI_RETRY_DELAY_MS ?? 600);
+@@ -11,7 +12,7 @@ const isRetryable = (err) =>
+   err instanceof SyntaxError || [429, 500, 503].includes(err?.status);
+ 
+ // Call Gemini and parse JSON, retrying once on parse errors / transient failures
+-async function generateJSON(prompt) {
++async function generateJSONOnce(prompt) {
+   let lastErr;
+   for (let attempt = 0; attempt < 2; attempt++) {
+     try {
+@@ -25,6 +26,25 @@ async function generateJSON(prompt) {
+   throw lastErr;
+ }
+ 
++// generateJSONOnce plus the spoiler safety net: if the answer looks like it spoils something, ask once more with a
++// stricter instruction, then remove whatever still matches. See services/spoilerGuard.js.
++async function generateJSON(prompt) {
++  let data = await generateJSONOnce(prompt);
++  if (spoilerGuard.hasRisk(data)) {
++    try {
++      const again = await generateJSONOnce(`${prompt}\n\n${spoilerGuard.STRICT_REMINDER}`);
++      if (!spoilerGuard.hasRisk(again)) return again;
++      data = again;
++    } catch {
++      // keep the first answer and scrub it below
++    }
++    const { value, removed } = spoilerGuard.scrub(data);
++    if (removed) console.warn(`[spoiler-guard] removed ${removed} sentence(s) from an AI answer`);
++    return value;
++  }
++  return data;
++}
++
+ const geminiService = {
+   // Generate movie recommendations based on user preferences
+   async getRecommendations({ favoriteMovies, genres, directors, actors, mood }) {
+@@ -167,7 +187,18 @@ Format movie titles in *asterisks* for emphasis.
+ ${SPOILER_RULE}
+ If the user asks for spoilers, politely decline and offer a spoiler-free alternative instead.`;
+ 
+-    return llm.chat(messages, systemInstruction);
++    let reply = await llm.chat(messages, systemInstruction);
++    if (spoilerGuard.hasRisk(reply)) {
++      try {
++        reply = await llm.chat(messages, `${systemInstruction}\n\n${spoilerGuard.STRICT_REMINDER}`);
++      } catch {
++        // keep the first reply and scrub it below
++      }
++      const { value, removed } = spoilerGuard.scrub(reply);
++      if (removed) console.warn(`[spoiler-guard] removed ${removed} sentence(s) from a chat reply`);
++      reply = value.trim() || spoilerGuard.FALLBACK_REPLY;
++    }
++    return reply;
+   },
+ 
+   // Tonight flow: choose from a fixed list of REAL titles (never invents titles).
+diff --git a/services/spoilerGuard.js b/services/spoilerGuard.js
+new file mode 100644
+index 0000000..d08d024
+--- /dev/null
++++ b/services/spoilerGuard.js
+@@ -0,0 +1,72 @@
++// services/spoilerGuard.js — A safety net behind the "spoiler-free, no exceptions" prompt rule.
++//
++// Language models can ignore instructions, so every AI answer is scanned for phrases that usually signal a
++// spoiler (deaths, twists, endings, reveals). If something is found the caller can retry once with a stricter
++// instruction; whatever still matches is removed sentence by sentence. This is a heuristic: it lowers the
++// risk but cannot guarantee a spoiler-free answer, and it can drop harmless sentences.
++const { SPOILER_RULE } = require('./spoilerPolicy');
++
++const PATTERNS = [
++  // deaths
++  /\b(dies|gets killed|is killed|are killed|killed off|is murdered|ends up dead|doesn't survive|does not survive|commits suicide|kills (himself|herself|themselves))\b/i,
++  // twists and reveals
++  /\b(plot twists?|twist ending|the twist|big twist|shocking twist|big reveal|final reveal)\b/i,
++  /\bturns? out (that|to be)\b|\bit is revealed\b|\bis revealed (to|as)\b|\bis actually\b|\bwas actually\b|\bthe real (killer|villain|culprit|traitor)\b/i,
++  // endings
++  /\b(the )?(ending|finale|final (scene|act|twist)|last scene|climax)\b/i,
++  /\b(in|by|at) the (end|final)\b/i,
++  // who did it
++  /\b(killer|villain|murderer|culprit|traitor|mole|spy) (is|was|turns out to be)\b/i,
++];
++
++// Fields that hold titles or names, which can contain these words innocently ("The Man Who Killed Don Quixote")
++const SKIP_KEYS = new Set(['title', 'movie1', 'movie2', 'watchfirst', 'similarmovies', 'ref', 'directors', 'genre']);
++
++const STRICT_REMINDER = `${SPOILER_RULE}
++Your previous answer contained wording that may reveal plot details. Rewrite it so that no sentence mentions deaths, twists, reveals, endings or who is responsible for anything. Describe only the premise, tone, themes, genre and craft.`;
++
++const sentences = (text) => String(text).split(/(?<=[.!?])\s+/).filter(Boolean);
++const isRisky = (sentence) => PATTERNS.some((p) => p.test(sentence));
++
++// Strings are scanned recursively; keys that hold titles are skipped
++function walk(value, key, visit) {
++  if (typeof value === 'string') return visit(value, key);
++  if (Array.isArray(value)) return value.map((v) => walk(v, key, visit));
++  if (value && typeof value === 'object') {
++    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, walk(v, k.toLowerCase(), visit)]));
++  }
++  return value;
++}
++
++const skipped = (key) => key !== undefined && SKIP_KEYS.has(key);
++
++function hasRisk(value) {
++  let found = false;
++  walk(value, undefined, (text, key) => {
++    if (!skipped(key) && sentences(text).some(isRisky)) found = true;
++    return text;
++  });
++  return found;
++}
++
++// Remove risky sentences from every string. Returns the cleaned value and how many sentences were removed.
++function scrub(value) {
++  let removed = 0;
++  const cleaned = walk(value, undefined, (text, key) => {
++    if (skipped(key)) return text;
++    const kept = sentences(text).filter((s) => {
++      if (isRisky(s)) {
++        removed += 1;
++        return false;
++      }
++      return true;
++    });
++    return kept.join(' ');
++  });
++  return { value: cleaned, removed };
++}
++
++const FALLBACK_REPLY =
++  "I'd rather not spoil that. I can tell you what makes it worth watching without giving anything away, if you like.";
++
++module.exports = { hasRisk, scrub, sentences, isRisky, STRICT_REMINDER, FALLBACK_REPLY, PATTERNS };
+diff --git a/services/tmdbService.js b/services/tmdbService.js
+index 04bab18..1201888 100644
+--- a/services/tmdbService.js
++++ b/services/tmdbService.js
+@@ -333,6 +333,39 @@ const tmdbService = {
+     return result;
+   },
+ 
++  // ─── Where to watch ────────────────────────────────────────────────────────
++
++  // Streaming availability per country, from TMDB's watch-provider data (provided by JustWatch; the app must show
++  // JustWatch attribution wherever it is displayed). Returns { [COUNTRY]: { link, stream, free, ads, rent, buy } }
++  // where each group is a list of { id, name, logo }.
++  async getWatchProviders(mediaType, id) {
++    const type = mediaType === 'tv' ? 'tv' : 'movie';
++    const cacheKey = `providers:${type}:${id}`;
++    const cached = cache.get(cacheKey);
++    if (cached) return cached;
++
++    const { data } = await tmdb.get(`/${type}/${id}/watch/providers`);
++    const group = (list) =>
++      (Array.isArray(list) ? list : [])
++        .slice(0, 12)
++        .map((p) => ({ id: p.provider_id, name: p.provider_name, logo: posterUrl(p.logo_path, 'w92') }))
++        .filter((p) => p.name);
++
++    const result = {};
++    for (const [country, info] of Object.entries(data.results || {})) {
++      result[country] = {
++        link: info.link || null,
++        stream: group(info.flatrate),
++        free: group(info.free),
++        ads: group(info.ads),
++        rent: group(info.rent),
++        buy: group(info.buy),
++      };
++    }
++    cache.set(cacheKey, result, 6 * 60 * 60 * 1000); // availability changes slowly: 6 hours
++    return result;
++  },
++
+   // Test hook (not used by the app)
+   _setHttpForTests(fake) {
+     tmdb = fake || realClient;
+diff --git a/test/libraryDiaryEdit.test.js b/test/libraryDiaryEdit.test.js
+new file mode 100644
+index 0000000..23df862
+--- /dev/null
++++ b/test/libraryDiaryEdit.test.js
+@@ -0,0 +1,74 @@
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const { loadEsm } = require('../testing/loadEsm');
++const core = loadEsm('library/libraryCore.js');
++
++const NOW = new Date('2026-11-24T12:00:00');
++const heat = { id: 11, mediaType: 'movie', title: 'Heat', releaseYear: '1995' };
++let n = 0;
++const log = (lib, entry, at = NOW) => core.logViewing(lib, heat, entry, { now: at, idFn: () => `e${++n}` });
++
++test('editing changes only the given fields and keeps identity fields', () => {
++  const { lib, entry } = log(core.emptyLibrary(), { watchedOn: '2026-11-20', rating: 8, review: 'Good', rewatch: false, extras: { mood: 'tense', where: 'home' } });
++  const edited = core.updateDiaryEntry(lib, entry.id, { review: 'Great.', extras: { mood: 'excited' } }, { now: NOW });
++  const e = edited.diary[0];
++  assert.equal(e.id, entry.id);
++  assert.equal(e.ref, 'movie:11');
++  assert.equal(e.createdAt, entry.createdAt);
++  assert.equal(e.watchedOn, '2026-11-20');
++  assert.equal(e.rating, 80);
++  assert.equal(e.review, 'Great.');
++  assert.deepEqual([e.extras.mood, e.extras.where], ['excited', 'home']); // extras merge
++});
++
++test('editing validates the date and rating, and rejects unknown entries', () => {
++  const { lib, entry } = log(core.emptyLibrary(), { watchedOn: '2026-11-20' });
++  assert.throws(() => core.updateDiaryEntry(lib, entry.id, { watchedOn: '2027-06-01' }, { now: NOW }), /future/);
++  assert.throws(() => core.updateDiaryEntry(lib, entry.id, { rating: 11 }, { now: NOW }), core.LibraryError);
++  assert.throws(() => core.updateDiaryEntry(lib, 'nope', { review: 'x' }, { now: NOW }), /not found/);
++});
++
++test('an empty date keeps the current one', () => {
++  const { lib, entry } = log(core.emptyLibrary(), { watchedOn: '2026-11-20' });
++  assert.equal(core.updateDiaryEntry(lib, entry.id, { watchedOn: '' }, { now: NOW }).diary[0].watchedOn, '2026-11-20');
++});
++
++test('the rating can be cleared and text is cleaned and capped', () => {
++  const { lib, entry } = log(core.emptyLibrary(), { rating: 7 });
++  const edited = core.updateDiaryEntry(lib, entry.id, { rating: '', review: 'x'.repeat(9000), extras: { timeOfDay: 'noon' } }, { now: NOW });
++  assert.equal(edited.diary[0].rating, null);
++  assert.equal(edited.diary[0].review.length, 4000);
++  assert.equal(edited.diary[0].extras.timeOfDay, '');
++});
++
++test('changing the rating of the latest entry updates the title rating and its history', () => {
++  const { lib, entry } = log(core.emptyLibrary(), { watchedOn: '2026-11-20', rating: 6 });
++  const edited = core.updateDiaryEntry(lib, entry.id, { rating: 9 }, { now: new Date('2026-11-25T10:00:00') });
++  assert.equal(edited.items['movie:11'].rating, 90);
++  assert.deepEqual(edited.items['movie:11'].ratingHistory.map((h) => h.rating), [60, 90]);
++});
++
++test('changing the rating of an older entry leaves the title rating alone', () => {
++  let { lib, entry: first } = log(core.emptyLibrary(), { watchedOn: '2026-10-01', rating: 6 });
++  ({ lib } = log(lib, { watchedOn: '2026-11-20', rating: 8 }));
++  const edited = core.updateDiaryEntry(lib, first.id, { rating: 3 }, { now: NOW });
++  assert.equal(edited.items['movie:11'].rating, 80);
++  assert.equal(edited.diary.find((e) => e.id === first.id).rating, 30);
++});
++
++test('moving an entry to a later date does not by itself change the title rating', () => {
++  let { lib, entry: first } = log(core.emptyLibrary(), { watchedOn: '2026-10-01', rating: 6 });
++  ({ lib } = log(lib, { watchedOn: '2026-11-20', rating: 8 }));
++  const edited = core.updateDiaryEntry(lib, first.id, { watchedOn: '2026-11-24' }, { now: NOW });
++  assert.equal(edited.items['movie:11'].rating, 80);
++});
++
++test('editing never mutates the input and returns a library that survives export and import', () => {
++  const { lib, entry } = log(core.emptyLibrary(), { rating: 7, review: 'ok' });
++  const before = JSON.stringify(lib);
++  const edited = core.updateDiaryEntry(lib, entry.id, { review: 'better', rewatch: true }, { now: NOW });
++  assert.equal(JSON.stringify(lib), before);
++  const { library, dropped } = core.parseImport(core.exportLibrary(edited, NOW));
++  assert.equal(dropped, 0);
++  assert.deepEqual(library, edited);
++});
+diff --git a/test/libraryScreen.test.js b/test/libraryScreen.test.js
+index ad6c64d..d5af62d 100644
+--- a/test/libraryScreen.test.js
++++ b/test/libraryScreen.test.js
+@@ -220,3 +220,44 @@ test('importing a bad file shows an error and leaves the library alone', async (
+   assert.match(msg.textContent, /not valid JSON/);
+   assert.equal(store.get().queue.movie.length, 1);
+ });
++
++test('editing a diary entry opens a prefilled form and saves the changes', async () => {
++  const { store, els, toasts } = await setup();
++  store.update((l) => core.logViewing(l, { id: 11, mediaType: 'movie', title: 'Heat', releaseYear: '1995' }, { watchedOn: '2026-11-20', rating: 7, review: 'ok' }, { idFn: () => 'e1' }));
++  click(els['#lib-panel'], 'edit-entry', { '[data-id]': { dataset: { id: 'e1' } } });
++  assert.ok(els['#lib-log'].innerHTML.includes('Edit: Heat') && els['#lib-log'].innerHTML.includes('Save changes'));
++  assert.ok(els['#lib-log'].innerHTML.includes('value="7.0"') && els['#lib-log'].innerHTML.includes('>ok</textarea>'));
++
++  const f = (value) => ({ value });
++  fire(els['#lib-log'], 'submit', {
++    target: { watchedOn: f('2026-11-21'), rating: f('9'), rewatch: { checked: true }, review: f('Better on rewatch'), withWhom: f('friends'), where: f(''), mood: f(''), timeOfDay: f(''), notes: f('') },
++    preventDefault() {},
++  });
++  const lib = store.get();
++  assert.equal(lib.diary.length, 1);
++  assert.equal(lib.diary[0].id, 'e1');
++  assert.equal(lib.diary[0].rating, 90);
++  assert.equal(lib.diary[0].review, 'Better on rewatch');
++  assert.equal(lib.diary[0].watchedOn, '2026-11-21');
++  assert.equal(lib.items['movie:11'].rating, 90);
++  assert.ok(toasts.some(([, msg]) => msg === 'Updated Heat'));
++  assert.equal(els['#lib-log'].innerHTML, '');
++});
++
++test('cancelling an edit changes nothing, and the next new log is not treated as an edit', async () => {
++  const { store, els } = await setup();
++  store.update((l) => core.logViewing(l, { id: 11, mediaType: 'movie', title: 'Heat' }, { watchedOn: '2026-11-20', rating: 7 }, { idFn: () => 'e1' }));
++  click(els['#lib-panel'], 'edit-entry', { '[data-id]': { dataset: { id: 'e1' } } });
++  click(els['#lib-log'], 'cancel-log');
++  assert.equal(store.get().diary[0].rating, 70);
++  // log another title afterwards: must create a new entry, not overwrite e1
++  store.update((l) => core.addToQueue(l, { id: 12, mediaType: 'movie', title: 'Ronin' }));
++  click(els['#lib-panel'], 'log', { '[data-ref]': { dataset: { ref: 'movie:12' } } });
++  const f = (value) => ({ value });
++  fire(els['#lib-log'], 'submit', {
++    target: { watchedOn: f('2026-11-22'), rating: f('6'), rewatch: { checked: false }, review: f(''), withWhom: f(''), where: f(''), mood: f(''), timeOfDay: f(''), notes: f('') },
++    preventDefault() {},
++  });
++  assert.equal(store.get().diary.length, 2);
++  assert.equal(store.get().diary.find((e) => e.id === 'e1').rating, 70);
++});
+diff --git a/test/libraryView.test.js b/test/libraryView.test.js
+index 55fcf85..6010562 100644
+--- a/test/libraryView.test.js
++++ b/test/libraryView.test.js
+@@ -128,6 +128,50 @@ test('the next episode is marked', () => {
+   assert.ok(html.includes('Next up') && html.includes('lib-ep--next'));
+ });
+ 
++// ─── Log / edit form ─────────────────────────────────────────────────────────
++const formInfo = core.sanitizeTitle(heat);
++
++test('a new log form is empty, defaults to today and offers "Save to diary"', () => {
++  const html = view.buildLogForm({ info: formInfo, rewatch: true, today: '2026-11-24', tomorrow: '2026-11-25' });
++  assert.ok(html.includes('Log: Heat &lt;i&gt; (1995)'));
++  assert.ok(html.includes('value="2026-11-24"') && html.includes('max="2026-11-25"'));
++  assert.ok(html.includes('Save to diary') && !html.includes('Save changes'));
++  assert.match(html, /name="rewatch" checked/);
++  assert.ok(html.includes('<output id="lib-rating-out">no rating</output>'));
++  assert.ok(!html.includes('<details class="lib-details" open'));
++});
++
++test('an edit form is prefilled and safely escaped', () => {
++  const { lib } = core.logViewing(core.emptyLibrary(), heat, {
++    watchedOn: '2026-11-20', rating: 8.5, rewatch: true, review: 'Said "wow" & <b>cried</b>\nTwice',
++    extras: { withWhom: 'Sam "S" <x>', where: 'cinema', mood: 'tense', timeOfDay: 'evening', notes: 'a <i>note</i>' },
++  }, { now: NOW, idFn: () => 'e1' });
++  const html = view.buildLogForm({ info: formInfo, entry: lib.diary[0], today: '2026-11-24', tomorrow: '2026-11-25' });
++  assert.ok(html.includes('Edit: Heat') && html.includes('Save changes') && !html.includes('Save to diary'));
++  assert.ok(html.includes('value="2026-11-20"'));
++  assert.ok(html.includes('<output id="lib-rating-out">8.5</output>') && html.includes('name="rating" min="0.1" max="10" step="0.1" value="8.5"'));
++  assert.match(html, /name="rewatch" checked/);
++  assert.ok(html.includes('Said &quot;wow&quot; &amp; &lt;b&gt;cried&lt;/b&gt;\nTwice'));
++  assert.ok(html.includes('value="Sam &quot;S&quot; &lt;x&gt;"'));
++  assert.ok(html.includes('<option selected>evening</option>'));
++  assert.ok(html.includes('a &lt;i&gt;note&lt;/i&gt;'));
++  assert.ok(html.includes('<details class="lib-details" open'));
++  assert.ok(!html.includes('<b>cried') && !html.includes('<x>'));
++});
++
++test('an entry without a rating edits as "no rating"', () => {
++  const { lib } = core.logViewing(core.emptyLibrary(), heat, {}, { now: NOW, idFn: () => 'e2' });
++  const html = view.buildLogForm({ info: formInfo, entry: lib.diary[0], today: 'x', tomorrow: 'y' });
++  assert.ok(html.includes('<output id="lib-rating-out">no rating</output>'));
++  assert.ok(!html.includes('<details class="lib-details" open'));
++});
++
++test('diary rows have Edit and Delete buttons', () => {
++  const { lib } = core.logViewing(core.emptyLibrary(), heat, {}, { now: NOW, idFn: () => 'e3' });
++  const html = view.buildDiaryEntry(core.diaryByMonth(lib)[0].entries[0]);
++  assert.ok(html.includes('data-action="edit-entry"') && html.includes('data-action="delete-entry"'));
++});
++
+ // The element ids the script uses must exist in the markup that the patch inserts
+ const patchScript = path.join(__dirname, '..', 'scripts', 'apply_tonight_ui.py');
+ test('every element id used by the Library screen exists in the dashboard markup', { skip: !fs.existsSync(patchScript) }, () => {
+diff --git a/test/providers.test.js b/test/providers.test.js
+new file mode 100644
+index 0000000..870b75b
+--- /dev/null
++++ b/test/providers.test.js
+@@ -0,0 +1,142 @@
++process.env.GEMINI_API_KEY = 'test-key';
++process.env.TMDB_API_KEY = 'test-key';
++
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const { loadEsm } = require('../testing/loadEsm');
++const tmdbService = require('../services/tmdbService');
++const providersController = require('../controllers/providersController');
++const pv = loadEsm('providers.js');
++
++// ─── service ─────────────────────────────────────────────────────────────────
++const tmdbResponse = {
++  id: 550,
++  results: {
++    IN: {
++      link: 'https://www.themoviedb.org/movie/550/watch?locale=IN',
++      flatrate: [{ provider_id: 8, provider_name: 'Netflix', logo_path: '/n.jpg' }],
++      rent: [{ provider_id: 2, provider_name: 'Apple TV', logo_path: '/a.jpg' }, { provider_id: 3, provider_name: '', logo_path: null }],
++    },
++    US: { link: 'https://www.themoviedb.org/movie/550/watch?locale=US', free: [{ provider_id: 9, provider_name: 'Tubi', logo_path: null }] },
++  },
++};
++
++test('getWatchProviders normalizes TMDB data per country, drops nameless providers, and caches', async () => {
++  const calls = [];
++  tmdbService._setHttpForTests({ get: async (url) => { calls.push(url); return { data: tmdbResponse }; } });
++  const a = await tmdbService.getWatchProviders('movie', 550);
++  const b = await tmdbService.getWatchProviders('movie', 550);
++  tmdbService._setHttpForTests(null);
++  assert.equal(calls.length, 1);
++  assert.equal(calls[0], '/movie/550/watch/providers');
++  assert.equal(a, b);
++  assert.deepEqual(a.IN.stream, [{ id: 8, name: 'Netflix', logo: 'https://image.tmdb.org/t/p/w92/n.jpg' }]);
++  assert.deepEqual(a.IN.rent.map((p) => p.name), ['Apple TV']);
++  assert.deepEqual(a.IN.free, []);
++  assert.equal(a.US.free[0].logo, null);
++});
++
++test('getWatchProviders uses the TV endpoint for shows and survives empty data', async () => {
++  const calls = [];
++  tmdbService._setHttpForTests({ get: async (url) => { calls.push(url); return { data: {} }; } });
++  const out = await tmdbService.getWatchProviders('tv', 9991);
++  tmdbService._setHttpForTests(null);
++  assert.equal(calls[0], '/tv/9991/watch/providers');
++  assert.deepEqual(out, {});
++});
++
++// ─── controller ──────────────────────────────────────────────────────────────
++const makeRes = () => ({ body: undefined, json(v) { this.body = v; return this; } });
++const original = tmdbService.getWatchProviders;
++test.afterEach(() => { tmdbService.getWatchProviders = original; });
++
++test('controller returns the requested country, upper-cased, with attribution', async () => {
++  tmdbService.getWatchProviders = async () => ({ IN: { link: 'https://www.themoviedb.org/x', stream: [{ id: 8, name: 'Netflix', logo: null }], free: [], ads: [], rent: [], buy: [] } });
++  const res = makeRes();
++  await providersController.get({ params: { mediaType: 'movie', id: '550' }, query: { country: 'in' } }, res);
++  assert.equal(res.body.country, 'IN');
++  assert.equal(res.body.available, true);
++  assert.equal(res.body.stream[0].name, 'Netflix');
++  assert.equal(res.body.attribution, 'JustWatch');
++});
++
++test('controller reports not available for countries without data, defaulting to US', async () => {
++  tmdbService.getWatchProviders = async () => ({ IN: { link: null, stream: [{ id: 1, name: 'X', logo: null }], free: [], ads: [], rent: [], buy: [] } });
++  const res = makeRes();
++  await providersController.get({ params: { mediaType: 'tv', id: '7' }, query: {} }, res);
++  assert.equal(res.body.country, 'US');
++  assert.equal(res.body.available, false);
++  assert.deepEqual(res.body.stream, []);
++});
++
++test('controller validates mediaType, id and country', async () => {
++  const run = (params, query) => providersController.get({ params, query }, makeRes());
++  await assert.rejects(run({ mediaType: 'podcast', id: '1' }, {}), { status: 400 });
++  await assert.rejects(run({ mediaType: 'movie', id: 'abc' }, {}), { status: 400 });
++  await assert.rejects(run({ mediaType: 'movie', id: '1' }, { country: 'INDIA' }), { status: 400 });
++  await assert.rejects(run({ mediaType: 'movie', id: '1' }, { country: '1;' }), { status: 400 });
++});
++
++// ─── frontend helpers ────────────────────────────────────────────────────────
++test('detectCountry prefers a language region, then the time zone, then the US', () => {
++  assert.equal(pv.detectCountry({ languages: ['en-IN', 'hi'] }), 'IN');
++  assert.equal(pv.detectCountry({ languages: ['en', 'fr-CA'] }), 'CA');
++  assert.equal(pv.detectCountry({ languages: ['en'], timeZone: 'Asia/Kolkata' }), 'IN');
++  assert.equal(pv.detectCountry({ languages: ['en'] }), 'US');
++  assert.equal(pv.detectCountry(), 'US');
++});
++
++const fakeStorage = (init = {}) => { const d = { ...init }; return { d, getItem: (k) => (k in d ? d[k] : null), setItem: (k, v) => { d[k] = String(v); } }; };
++
++test('getCountry uses a valid saved choice, ignores junk, and saveCountry validates', () => {
++  assert.equal(pv.getCountry(fakeStorage({ cinemind_country: 'GB' }), { languages: ['en-IN'] }), 'GB');
++  assert.equal(pv.getCountry(fakeStorage({ cinemind_country: '<x>' }), { languages: ['en-IN'] }), 'IN');
++  assert.equal(pv.getCountry({ getItem() { throw new Error('blocked'); } }, { languages: ['en-AU'] }), 'AU');
++  const s = fakeStorage();
++  pv.saveCountry(s, 'in');
++  assert.deepEqual(s.d, {});
++  pv.saveCountry(s, 'IN');
++  assert.equal(s.d.cinemind_country, 'IN');
++});
++
++test('countryOptionsHtml selects the current country and adds unknown ones', () => {
++  assert.match(pv.countryOptionsHtml('IN'), /<option value="IN" selected>India<\/option>/);
++  assert.match(pv.countryOptionsHtml('PH'), /<option value="PH" selected>Other \(PH\)<\/option>/);
++});
++
++test('buildProviders shows groups, caps each list, and escapes names', () => {
++  const many = Array.from({ length: 7 }, (_, i) => ({ id: i, name: `Svc${i}`, logo: null }));
++  const html = pv.buildProviders({
++    country: 'IN', available: true, link: 'https://www.themoviedb.org/movie/1/watch?locale=IN',
++    stream: [{ id: 1, name: 'Net<b>flix', logo: 'https://image.tmdb.org/t/p/w92/n.jpg' }], free: [], ads: [], rent: many, buy: [],
++  });
++  assert.ok(html.includes('Net&lt;b&gt;flix') && !html.includes('<b>flix'));
++  assert.ok(html.includes('>Stream<') && html.includes('>Rent<'));
++  assert.ok(!html.includes('>Free<') && !html.includes('>Buy<'));
++  assert.ok(html.includes('Svc4') && !html.includes('Svc5') && html.includes('+2 more'));
++  assert.ok(html.includes('class="where__logo"') && html.includes('All options'));
++});
++
++test('buildProviders drops untrusted links and logos', () => {
++  const html = pv.buildProviders({ country: 'IN', available: true, link: 'https://evil.example/x', stream: [{ id: 1, name: 'A', logo: 'https://evil.example/l.png' }], free: [], ads: [], rent: [], buy: [] });
++  assert.ok(!html.includes('evil.example') && !html.includes('<img') && !html.includes('All options'));
++});
++
++test('buildProviders handles unavailable and missing data', () => {
++  assert.match(pv.buildProviders({ country: 'IN', available: false }), /Not listed on streaming services in IN/);
++  assert.match(pv.buildProviders(null), /Not listed/);
++});
++
++test('fetchProviders requests the endpoint once per title and country, and surfaces errors', async () => {
++  const calls = [];
++  const ok = async (url) => { calls.push(url); return { ok: true, json: async () => ({ country: 'IN', available: false }) }; };
++  await pv.fetchProviders('movie', 123456, 'IN', ok);
++  await pv.fetchProviders('movie', 123456, 'IN', ok);
++  assert.deepEqual(calls, ['/api/providers/movie/123456?country=IN']);
++  await assert.rejects(pv.fetchProviders('tv', 654321, 'IN', async () => ({ ok: false, json: async () => ({ error: 'TMDB down' }) })), /TMDB down/);
++});
++
++test('the attribution names JustWatch and links out safely', () => {
++  assert.match(pv.ATTRIBUTION_HTML, /JustWatch/);
++  assert.match(pv.ATTRIBUTION_HTML, /rel="noopener noreferrer"/);
++});
+diff --git a/test/spoilerGuard.test.js b/test/spoilerGuard.test.js
+new file mode 100644
+index 0000000..ff5564f
+--- /dev/null
++++ b/test/spoilerGuard.test.js
+@@ -0,0 +1,160 @@
++process.env.GEMINI_API_KEY = 'test-key';
++process.env.TMDB_API_KEY = 'test-key';
++process.env.AI_RETRY_DELAY_MS = '0';
++
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const guard = require('../services/spoilerGuard');
++const llm = require('../services/llmClient');
++const gemini = require('../services/geminiService');
++
++const RISKY = [
++  'The hero dies in the third act.',
++  'It turns out that the butler did it.',
++  'The twist ending will shock you.',
++  'By the end, everything changes.',
++  'The villain is his own brother.',
++  'She does not survive the night.',
++  'A big reveal changes everything we know.',
++  'He kills himself.',
++  "It's all a dream in the final scene.",
++  'The real killer is never caught.',
++];
++
++const BENIGN = [
++  'A gripping thriller about a detective hunting a serial killer.',
++  'Beautifully shot, with a haunting score.',
++  'Warm, funny and easy to watch on a lazy evening.',
++  'A heist crew plans one last job.',
++  'Perfect for a rainy day with friends.',
++  'Fans of slow-burn character drama will feel at home.',
++  'The performances anchor a story about family and loss.',
++  'Expect sharp dialogue and a dry sense of humour.',
++];
++
++test('sentences that usually signal spoilers are flagged', () => {
++  for (const s of RISKY) assert.equal(guard.isRisky(s), true, `should flag: ${s}`);
++});
++
++test('ordinary descriptions are not flagged', () => {
++  for (const s of BENIGN) assert.equal(guard.isRisky(s), false, `should not flag: ${s}`);
++});
++
++test('hasRisk scans nested values but skips title-like keys', () => {
++  assert.equal(guard.hasRisk({ title: 'The Man Who Killed Don Quixote', whyWatch: 'A charming adventure.' }), false);
++  assert.equal(guard.hasRisk({ similarMovies: ['The Day the Earth Dies'], movie1: 'Who Dies Next?' }), false);
++  assert.equal(guard.hasRisk([{ explanation: 'Fun. The hero dies at the end.' }]), true);
++  assert.equal(guard.hasRisk({ a: { b: ['fine', { c: 'The twist ending is great.' }] } }), true);
++  assert.equal(guard.hasRisk(null), false);
++  assert.equal(guard.hasRisk(42), false);
++});
++
++test('scrub removes only the risky sentences and counts them', () => {
++  const input = { title: 'Heat', explanation: 'A taut crime saga. The hero dies at the end. Superb cast.', themes: ['Obsession'], n: 5 };
++  const { value, removed } = guard.scrub(input);
++  assert.equal(removed, 1);
++  assert.equal(value.explanation, 'A taut crime saga. Superb cast.');
++  assert.equal(value.title, 'Heat');
++  assert.deepEqual(value.themes, ['Obsession']);
++  assert.equal(value.n, 5);
++});
++
++test('scrub does not mutate its input and leaves clean data alone', () => {
++  const input = { explanation: 'Fun. The villain is his brother.' };
++  const copy = JSON.stringify(input);
++  guard.scrub(input);
++  assert.equal(JSON.stringify(input), copy);
++  assert.deepEqual(guard.scrub({ a: 'All good.' }), { value: { a: 'All good.' }, removed: 0 });
++});
++
++test('scrub can empty a field that has only risky sentences', () => {
++  assert.equal(guard.scrub({ reason: 'The twist ending is brilliant.' }).value.reason, '');
++});
++
++// ─── flow inside the Gemini service ──────────────────────────────────────────
++const realGenerate = llm.generateJSONText;
++const realChat = llm.chat;
++const realWarn = console.warn;
++test.beforeEach(() => { console.warn = () => {}; });
++test.afterEach(() => { llm.generateJSONText = realGenerate; llm.chat = realChat; console.warn = realWarn; });
++
++const sequence = (...answers) => {
++  const prompts = [];
++  llm.generateJSONText = async (prompt) => {
++    prompts.push(prompt);
++    const next = answers[Math.min(prompts.length - 1, answers.length - 1)];
++    if (next instanceof Error) throw next;
++    return next;
++  };
++  return prompts;
++};
++const rec = (explanation) => JSON.stringify([{ title: 'Heat', explanation }]);
++
++test('a clean answer costs a single call', async () => {
++  const prompts = sequence(rec('A taut crime saga.'));
++  const out = await gemini.getMoodRecommendations('tense');
++  assert.equal(prompts.length, 1);
++  assert.equal(out[0].explanation, 'A taut crime saga.');
++});
++
++test('a risky answer triggers one stricter retry, and a clean retry is used as is', async () => {
++  const prompts = sequence(rec('Great. The hero dies at the end.'), rec('A taut crime saga.'));
++  const out = await gemini.getMoodRecommendations('tense');
++  assert.equal(prompts.length, 2);
++  assert.ok(prompts[1].includes('may reveal plot details'));
++  assert.equal(out[0].explanation, 'A taut crime saga.');
++});
++
++test('if the retry is still risky, the offending sentences are removed', async () => {
++  const prompts = sequence(rec('Great. The hero dies at the end.'), rec('Superb. The twist ending is wild.'));
++  const out = await gemini.getMoodRecommendations('tense');
++  assert.equal(prompts.length, 2);
++  assert.equal(out[0].explanation, 'Superb.');
++});
++
++test('if the retry fails, the first answer is scrubbed instead of failing the request', async () => {
++  const prompts = sequence(rec('Great. The villain is his brother.'), Object.assign(new Error('bad request'), { status: 400 }));
++  const out = await gemini.getMoodRecommendations('tense');
++  assert.equal(prompts.length, 2);
++  assert.equal(out[0].explanation, 'Great.');
++});
++
++test('titles that contain trigger words do not cause retries', async () => {
++  const prompts = sequence(JSON.stringify([{ title: 'The Man Who Killed Don Quixote', explanation: 'A fantastical adventure.' }]));
++  const out = await gemini.getMoodRecommendations('fun');
++  assert.equal(prompts.length, 1);
++  assert.equal(out[0].title, 'The Man Who Killed Don Quixote');
++});
++
++test('Tonight reasons are guarded too', async () => {
++  sequence(JSON.stringify({ picks: [{ ref: 'movie:1', reason: 'Cosy. By the end you will cry.', tonightFit: 'Easy' }] }), JSON.stringify({ picks: [{ ref: 'movie:1', reason: 'A cosy pick.', tonightFit: 'Easy' }] }));
++  const picks = await gemini.pickFromCandidates({ candidates: [{ id: 1, title: 'A', releaseYear: '2000', genres: [], rating: 7 }], mood: 'cosy' });
++  assert.equal(picks[0].reason, 'A cosy pick.');
++});
++
++test('chat: a risky reply gets one stricter retry', async () => {
++  const calls = [];
++  llm.chat = async (messages, instruction) => {
++    calls.push(instruction);
++    return calls.length === 1 ? 'You will love it. The hero dies at the end.' : 'You will love its warmth.';
++  };
++  const reply = await gemini.chat([{ role: 'user', content: 'Tell me about Heat' }]);
++  assert.equal(calls.length, 2);
++  assert.ok(calls[1].includes('may reveal plot details'));
++  assert.equal(reply, 'You will love its warmth.');
++});
++
++test('chat: remaining risky sentences are removed, and an emptied reply becomes a friendly fallback', async () => {
++  llm.chat = async () => 'Nice pick. The twist ending is wild.';
++  assert.equal(await gemini.chat([{ role: 'user', content: 'hi' }]), 'Nice pick.');
++  llm.chat = async () => 'The twist ending is wild.';
++  assert.equal(await gemini.chat([{ role: 'user', content: 'hi' }]), guard.FALLBACK_REPLY);
++});
++
++test('chat: a clean reply costs one call and a refusal that mentions "spoilers" is allowed', async () => {
++  let calls = 0;
++  llm.chat = async () => { calls += 1; return "I can't share spoilers, but I can say it's a warm drama."; };
++  const reply = await gemini.chat([{ role: 'user', content: 'who dies?' }]);
++  assert.equal(calls, 1);
++  assert.ok(reply.includes("can't share spoilers"));
++});
+diff --git a/test/tonightScreen.test.js b/test/tonightScreen.test.js
+new file mode 100644
+index 0000000..3b72547
+--- /dev/null
++++ b/test/tonightScreen.test.js
+@@ -0,0 +1,146 @@
++// Smoke tests for the Tonight screen's behaviour, using a tiny fake DOM (handler logic, not real rendering).
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const { loadEsm } = require('../testing/loadEsm');
++
++const core = loadEsm('library/libraryCore.js');
++const ui = loadEsm('ui.js');
++const logic = loadEsm('tonightLogic.js');
++const providers = loadEsm('providers.js');
++const { createLibraryStore } = loadEsm('library/store.js', core);
++
++const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
++const fakeStorage = () => { const d = {}; return { d, getItem: (k) => (k in d ? d[k] : null), setItem: (k, v) => { d[k] = String(v); } }; };
++
++function fakeEl(extra = {}) {
++  const handlers = {};
++  const { classes = [], ...rest } = extra;
++  const el = {
++    innerHTML: '', value: '', className: classes.join(' '), handlers, parentNode: null,
++    addEventListener(type, fn) { (handlers[type] ||= []).push(fn); },
++    querySelector: () => null, querySelectorAll: () => [], setAttribute() {}, click() { (handlers.click || []).forEach((fn) => fn({})); },
++    ...rest,
++  };
++  // classList mirrors className, like the real DOM
++  const list = () => el.className.split(/\s+/).filter(Boolean);
++  el.classList = {
++    add: (c) => { if (!list().includes(c)) el.className = [...list(), c].join(' '); },
++    remove: (c) => { el.className = list().filter((x) => x !== c).join(' '); },
++    has: (c) => list().includes(c),
++  };
++  return el;
++}
++const fire = (node, type, event = {}) => (node.handlers[type] || []).forEach((fn) => fn(event));
++
++const pick = (id, mediaType = 'movie') => ({ id, mediaType, title: `Title ${id}`, releaseYear: '2010', rating: 7.5, genres: ['Comedy'], poster: null, reason: 'Good', tonightFit: 'Easy', source: 'ai' });
++
++async function setup({ picks = [pick(1), pick(2, 'tv')], providersImpl, language = 'en-IN' } = {}) {
++  const storage = fakeStorage();
++  const store = createLibraryStore(fakeStorage());
++  const requests = [];
++  const providerCalls = [];
++  const slots = new Map();
++  const toasts = [];
++
++  const results = fakeEl();
++  results.querySelector = (sel) => {
++    const m = /^\[data-where="([^"]+)"\]$/.exec(sel);
++    if (!m) return null;
++    if (!slots.has(m[1])) slots.set(m[1], { innerHTML: '' });
++    return slots.get(m[1]);
++  };
++  const inserted = [];
++  const parent = { insertBefore: (el) => inserted.push(el) };
++  results.parentNode = parent;
++  const countrySelect = fakeEl();
++  const els = {
++    '#tonight-type': fakeEl(), '#tonight-time': fakeEl(), '#tonight-moods': fakeEl(), '#tonight-mood-input': fakeEl(),
++    '#tonight-go': fakeEl(), '#tonight-again': fakeEl(), '#tonight-more': fakeEl({ classes: ['hidden'] }), '#tonight-results': results,
++  };
++  const root = { querySelector: (sel) => els[sel] || null };
++
++  const { initTonight } = loadEsm('tonight.js', {
++    aiApi: { tonight: async (body) => { requests.push(body); return { picks, source: 'ai', candidatesConsidered: 10 }; } },
++    esc: ui.esc,
++    showToast: (m, t) => toasts.push([t, m]),
++    setLoading() {},
++    syncWatchlistButtons() {},
++    getLibraryStore: () => store,
++    window: { localStorage: storage, navigator: { languages: [language] } },
++    document: { createElement: () => fakeEl({ querySelector: (sel) => (sel === '#tonight-country' ? countrySelect : null) }) },
++    ...core, ...providers, ...logic,
++    fetchProviders: providersImpl || (async (type, id, country) => { providerCalls.push([type, id, country]); return { country, available: true, link: null, stream: [{ id: 1, name: `On ${country}`, logo: null }], free: [], ads: [], rent: [], buy: [] }; }),
++  });
++  initTonight(root);
++  return { els, results, store, requests, providerCalls, slots, toasts, storage, countrySelect, inserted };
++}
++
++test('the country control and attribution are added next to the results, using the browser region', async () => {
++  const { inserted } = await setup({ language: 'en-IN' });
++  assert.equal(inserted.length, 2);
++  assert.ok(inserted[0].innerHTML.includes('Where to watch in'));
++  assert.ok(inserted[0].innerHTML.includes('<option value="IN" selected>India</option>'));
++  assert.ok(inserted[1].innerHTML.includes('JustWatch'));
++  assert.ok(inserted[1].classList.has('hidden')); // shown once there are picks
++});
++
++test('picking requests Tonight, renders the cards, then fills where to watch for each pick', async () => {
++  const { els, results, requests, providerCalls, slots, inserted } = await setup();
++  els['#tonight-go'].click();
++  await sleep(20);
++  assert.equal(requests.length, 1);
++  assert.equal(requests[0].type, 'movie');
++  assert.ok(results.innerHTML.includes('Title 1') && results.innerHTML.includes('Title 2'));
++  assert.deepEqual(providerCalls.sort(), [['movie', 1, 'IN'], ['tv', 2, 'IN']].sort());
++  assert.ok(slots.get('movie:1').innerHTML.includes('On IN'));
++  assert.ok(slots.get('tv:2').innerHTML.includes('On IN'));
++  assert.ok(!els['#tonight-more'].classList.has('hidden'));
++  assert.ok(!inserted[1].classList.has('hidden'));
++});
++
++test('changing the country saves it and refetches availability without asking the AI again', async () => {
++  const { els, requests, providerCalls, slots, storage, countrySelect } = await setup();
++  els['#tonight-go'].click();
++  await sleep(20);
++  providerCalls.length = 0;
++  fire(countrySelect, 'change', { target: { value: 'US' } });
++  await sleep(20);
++  assert.equal(requests.length, 1);
++  assert.equal(storage.d.cinemind_country, 'US');
++  assert.deepEqual(providerCalls.map((c) => c[2]), ['US', 'US']);
++  assert.ok(slots.get('movie:1').innerHTML.includes('On US'));
++});
++
++test('a slow answer for the old country never overwrites the new one', async () => {
++  const resolvers = {};
++  const providersImpl = (type, id, country) => new Promise((resolve) => { resolvers[`${type}:${id}:${country}`] = () => resolve({ country, available: true, link: null, stream: [{ id: 1, name: `On ${country}`, logo: null }], free: [], ads: [], rent: [], buy: [] }); });
++  const { els, slots, countrySelect } = await setup({ providersImpl, picks: [pick(1)] });
++  els['#tonight-go'].click();
++  await sleep(20);
++  fire(countrySelect, 'change', { target: { value: 'US' } });
++  await sleep(5);
++  resolvers['movie:1:US']();
++  await sleep(5);
++  resolvers['movie:1:IN']();
++  await sleep(5);
++  assert.ok(slots.get('movie:1').innerHTML.includes('On US'));
++  assert.ok(!slots.get('movie:1').innerHTML.includes('On IN'));
++});
++
++test('a failed availability lookup shows a quiet message and the picks stay', async () => {
++  const { els, results, slots } = await setup({ providersImpl: async () => { throw new Error('down'); }, picks: [pick(1)] });
++  els['#tonight-go'].click();
++  await sleep(20);
++  assert.ok(results.innerHTML.includes('Title 1'));
++  assert.ok(slots.get('movie:1').innerHTML.includes('not available right now'));
++});
++
++test('"+ Queue" still adds a pick to the library', async () => {
++  const { els, results, store } = await setup();
++  els['#tonight-go'].click();
++  await sleep(20);
++  const btn = { disabled: false, textContent: '+ Queue', dataset: { queueRef: 'tv:2' } };
++  fire(results, 'click', { target: { closest: (sel) => (sel === '[data-queue-ref]' ? btn : null) } });
++  assert.deepEqual(store.get().queue.tv.map((q) => q.ref), ['tv:2']);
++  assert.equal(btn.textContent, 'In queue');
++});
+diff --git a/test/tonightUi.test.js b/test/tonightUi.test.js
+index 9c1c1a1..3b59d2d 100644
+--- a/test/tonightUi.test.js
++++ b/test/tonightUi.test.js
+@@ -12,6 +12,7 @@ const read = (file) => fs.readFileSync(path.join(__dirname, '..', 'public', 'js'
+ const ui = loadEsm('ui.js');
+ const logic = loadEsm('tonightLogic.js');
+ const libraryCore = loadEsm('library/libraryCore.js');
++const providers = loadEsm('providers.js');
+ const view = loadEsm('tonight.js', {
+   aiApi: {},
+   esc: ui.esc,
+@@ -20,6 +21,7 @@ const view = loadEsm('tonight.js', {
+   syncWatchlistButtons() {},
+   getLibraryStore() {},
+   ...libraryCore,
++  ...providers,
+   ...logic,
+ });
+ 
+@@ -119,6 +121,11 @@ test('queue button data works with the library core (a pick can be queued as is)
+   assert.equal(lib.items['tv:21'].title, 'The Wire');
+ });
+ 
++test('every card has a where-to-watch slot keyed by its ref', () => {
++  assert.ok(view.buildTonightCard(moviePick).includes('data-where="movie:11"'));
++  assert.ok(view.buildTonightCard({ ...moviePick, id: 7, mediaType: 'tv' }).includes('data-where="tv:7"'));
++});
++
+ test('unsafe poster URLs are not rendered as images', () => {
+   const html = view.buildTonightCard({ ...moviePick, poster: 'javascript:alert(1)' });
+   assert.ok(!html.includes('<img'));
+@@ -136,6 +143,7 @@ test('every element id used by tonight.js exists in the dashboard section markup
+   const script = fs.readFileSync(patchScript, 'utf8');
+   const used = new Set((read('tonight.js').match(/#(tonight-[a-z-]+)/g) || []).map((s) => s.slice(1)));
+   used.delete('tonight-retry'); // created at runtime by the error state
++  used.delete('tonight-country'); // created at runtime by initTonight
+   assert.ok(used.size >= 7);
+   for (const id of used) assert.ok(script.includes(`id="${id}"`), `dashboard markup is missing #${id}`);
+ });

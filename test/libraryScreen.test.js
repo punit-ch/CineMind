@@ -220,3 +220,44 @@ test('importing a bad file shows an error and leaves the library alone', async (
   assert.match(msg.textContent, /not valid JSON/);
   assert.equal(store.get().queue.movie.length, 1);
 });
+
+test('editing a diary entry opens a prefilled form and saves the changes', async () => {
+  const { store, els, toasts } = await setup();
+  store.update((l) => core.logViewing(l, { id: 11, mediaType: 'movie', title: 'Heat', releaseYear: '1995' }, { watchedOn: '2026-11-20', rating: 7, review: 'ok' }, { idFn: () => 'e1' }));
+  click(els['#lib-panel'], 'edit-entry', { '[data-id]': { dataset: { id: 'e1' } } });
+  assert.ok(els['#lib-log'].innerHTML.includes('Edit: Heat') && els['#lib-log'].innerHTML.includes('Save changes'));
+  assert.ok(els['#lib-log'].innerHTML.includes('value="7.0"') && els['#lib-log'].innerHTML.includes('>ok</textarea>'));
+
+  const f = (value) => ({ value });
+  fire(els['#lib-log'], 'submit', {
+    target: { watchedOn: f('2026-11-21'), rating: f('9'), rewatch: { checked: true }, review: f('Better on rewatch'), withWhom: f('friends'), where: f(''), mood: f(''), timeOfDay: f(''), notes: f('') },
+    preventDefault() {},
+  });
+  const lib = store.get();
+  assert.equal(lib.diary.length, 1);
+  assert.equal(lib.diary[0].id, 'e1');
+  assert.equal(lib.diary[0].rating, 90);
+  assert.equal(lib.diary[0].review, 'Better on rewatch');
+  assert.equal(lib.diary[0].watchedOn, '2026-11-21');
+  assert.equal(lib.items['movie:11'].rating, 90);
+  assert.ok(toasts.some(([, msg]) => msg === 'Updated Heat'));
+  assert.equal(els['#lib-log'].innerHTML, '');
+});
+
+test('cancelling an edit changes nothing, and the next new log is not treated as an edit', async () => {
+  const { store, els } = await setup();
+  store.update((l) => core.logViewing(l, { id: 11, mediaType: 'movie', title: 'Heat' }, { watchedOn: '2026-11-20', rating: 7 }, { idFn: () => 'e1' }));
+  click(els['#lib-panel'], 'edit-entry', { '[data-id]': { dataset: { id: 'e1' } } });
+  click(els['#lib-log'], 'cancel-log');
+  assert.equal(store.get().diary[0].rating, 70);
+  // log another title afterwards: must create a new entry, not overwrite e1
+  store.update((l) => core.addToQueue(l, { id: 12, mediaType: 'movie', title: 'Ronin' }));
+  click(els['#lib-panel'], 'log', { '[data-ref]': { dataset: { ref: 'movie:12' } } });
+  const f = (value) => ({ value });
+  fire(els['#lib-log'], 'submit', {
+    target: { watchedOn: f('2026-11-22'), rating: f('6'), rewatch: { checked: false }, review: f(''), withWhom: f(''), where: f(''), mood: f(''), timeOfDay: f(''), notes: f('') },
+    preventDefault() {},
+  });
+  assert.equal(store.get().diary.length, 2);
+  assert.equal(store.get().diary.find((e) => e.id === 'e1').rating, 70);
+});
