@@ -128,6 +128,50 @@ test('the next episode is marked', () => {
   assert.ok(html.includes('Next up') && html.includes('lib-ep--next'));
 });
 
+// ─── Log / edit form ─────────────────────────────────────────────────────────
+const formInfo = core.sanitizeTitle(heat);
+
+test('a new log form is empty, defaults to today and offers "Save to diary"', () => {
+  const html = view.buildLogForm({ info: formInfo, rewatch: true, today: '2026-11-24', tomorrow: '2026-11-25' });
+  assert.ok(html.includes('Log: Heat &lt;i&gt; (1995)'));
+  assert.ok(html.includes('value="2026-11-24"') && html.includes('max="2026-11-25"'));
+  assert.ok(html.includes('Save to diary') && !html.includes('Save changes'));
+  assert.match(html, /name="rewatch" checked/);
+  assert.ok(html.includes('<output id="lib-rating-out">no rating</output>'));
+  assert.ok(!html.includes('<details class="lib-details" open'));
+});
+
+test('an edit form is prefilled and safely escaped', () => {
+  const { lib } = core.logViewing(core.emptyLibrary(), heat, {
+    watchedOn: '2026-11-20', rating: 8.5, rewatch: true, review: 'Said "wow" & <b>cried</b>\nTwice',
+    extras: { withWhom: 'Sam "S" <x>', where: 'cinema', mood: 'tense', timeOfDay: 'evening', notes: 'a <i>note</i>' },
+  }, { now: NOW, idFn: () => 'e1' });
+  const html = view.buildLogForm({ info: formInfo, entry: lib.diary[0], today: '2026-11-24', tomorrow: '2026-11-25' });
+  assert.ok(html.includes('Edit: Heat') && html.includes('Save changes') && !html.includes('Save to diary'));
+  assert.ok(html.includes('value="2026-11-20"'));
+  assert.ok(html.includes('<output id="lib-rating-out">8.5</output>') && html.includes('name="rating" min="0.1" max="10" step="0.1" value="8.5"'));
+  assert.match(html, /name="rewatch" checked/);
+  assert.ok(html.includes('Said &quot;wow&quot; &amp; &lt;b&gt;cried&lt;/b&gt;\nTwice'));
+  assert.ok(html.includes('value="Sam &quot;S&quot; &lt;x&gt;"'));
+  assert.ok(html.includes('<option selected>evening</option>'));
+  assert.ok(html.includes('a &lt;i&gt;note&lt;/i&gt;'));
+  assert.ok(html.includes('<details class="lib-details" open'));
+  assert.ok(!html.includes('<b>cried') && !html.includes('<x>'));
+});
+
+test('an entry without a rating edits as "no rating"', () => {
+  const { lib } = core.logViewing(core.emptyLibrary(), heat, {}, { now: NOW, idFn: () => 'e2' });
+  const html = view.buildLogForm({ info: formInfo, entry: lib.diary[0], today: 'x', tomorrow: 'y' });
+  assert.ok(html.includes('<output id="lib-rating-out">no rating</output>'));
+  assert.ok(!html.includes('<details class="lib-details" open'));
+});
+
+test('diary rows have Edit and Delete buttons', () => {
+  const { lib } = core.logViewing(core.emptyLibrary(), heat, {}, { now: NOW, idFn: () => 'e3' });
+  const html = view.buildDiaryEntry(core.diaryByMonth(lib)[0].entries[0]);
+  assert.ok(html.includes('data-action="edit-entry"') && html.includes('data-action="delete-entry"'));
+});
+
 // The element ids the script uses must exist in the markup that the patch inserts
 const patchScript = path.join(__dirname, '..', 'scripts', 'apply_tonight_ui.py');
 test('every element id used by the Library screen exists in the dashboard markup', { skip: !fs.existsSync(patchScript) }, () => {

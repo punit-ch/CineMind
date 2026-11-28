@@ -4,12 +4,13 @@ import { esc, showToast, setLoading } from './ui.js';
 import { syncWatchlistButtons } from './watchlist.js';
 import { getLibraryStore } from './library/instance.js';
 import { addToQueue, LibraryError } from './library/libraryCore.js';
+import { ATTRIBUTION_HTML, getCountry, saveCountry, countryOptionsHtml, buildProviders, fetchProviders } from './providers.js';
 import {
   TYPES, TIMES, MOODS, buildRequest, nextPage, refOf, sourceLabel, tmdbUrl, movieData, loadPrefs, savePrefs,
 } from './tonightLogic.js';
 
-// Only allow http(s) image URLs
-const safeImg = (url) => (/^https?:\/\//i.test(url || '') ? esc(url) : '');
+// Only allow TMDB image URLs
+const safeImg = (url) => (/^https:\/\/image\.tmdb\.org\//i.test(url || '') ? esc(url) : '');
 
 const STAR = '★';
 
@@ -43,6 +44,7 @@ export function buildTonightCard(pick, index = 0, queued = false) {
           ${pick.tonightFit ? `<span class="tonight-card__fit">${esc(pick.tonightFit)}</span>` : ''}
           <span class="tonight-card__source tonight-card__source--${pick.source === 'ai' ? 'ai' : 'top'}">${esc(sourceLabel(pick.source))}</span>
         </div>
+        <div class="tonight-card__where" data-where="${esc(refOf(pick))}"><span class="where__none">Checking where to watch…</span></div>
         <div class="tonight-card__actions">
           <button type="button" class="btn btn-primary btn-sm" data-queue-ref="${esc(refOf(pick))}" ${queued ? 'disabled' : ''}>${queued ? 'In queue' : '+ Queue'}</button>
           ${isTv
@@ -71,6 +73,18 @@ export function initTonight(root) {
   if (!typeEl || !timeEl || !moodsEl || !moodInput || !goBtn || !againBtn || !results) return;
 
   const prefs = loadPrefs(window.localStorage);
+  let country = getCountry(window.localStorage, {
+    languages: window.navigator?.languages || [],
+    timeZone: (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return ''; } })(),
+  });
+  const countryBar = document.createElement('div');
+  countryBar.className = 'tonight-country';
+  countryBar.innerHTML = `<label>Where to watch in <select id="tonight-country" class="input-field">${countryOptionsHtml(country)}</select></label>`;
+  results.parentNode?.insertBefore(countryBar, results);
+  const attribution = document.createElement('p');
+  attribution.className = 'tonight-attrib text-muted body-sm hidden';
+  attribution.innerHTML = ATTRIBUTION_HTML;
+  results.parentNode?.insertBefore(attribution, moreEl);
   const state = { page: 1, shown: [], loading: false, request: 0, picks: new Map() };
   const store = getLibraryStore();
   const queuedRefs = () => new Set([...store.get().queue.movie, ...store.get().queue.tv].map((q) => q.ref));
@@ -125,6 +139,30 @@ export function initTonight(root) {
     moreEl.classList.add('hidden');
   };
 
+  // Fill each card's availability line (separate requests, so a slow one never blocks the picks)
+  async function fillProviders() {
+    const token = state.request;
+    const target = country;
+    for (const pick of state.picks.values()) {
+      const slot = results.querySelector(`[data-where="${refOf(pick)}"]`);
+      if (!slot) continue;
+      slot.innerHTML = '<span class="where__none">Checking where to watch…</span>';
+      fetchProviders(pick.mediaType === 'tv' ? 'tv' : 'movie', pick.id, target)
+        .then((data) => {
+          if (token === state.request && target === country) slot.innerHTML = buildProviders(data);
+        })
+        .catch(() => {
+          if (token === state.request && target === country) slot.innerHTML = '<span class="where__none">Availability is not available right now.</span>';
+        });
+    }
+  }
+
+  countryBar.querySelector('#tonight-country')?.addEventListener('change', (e) => {
+    country = e.target.value;
+    saveCountry(window.localStorage, country);
+    if (state.picks.size) fillProviders();
+  });
+
   async function run(fresh) {
     if (state.loading) return;
     state.loading = true;
@@ -158,6 +196,8 @@ export function initTonight(root) {
       results.innerHTML = data.picks.map((p, i) => buildTonightCard(p, i, queued.has(refOf(p)))).join('');
       syncWatchlistButtons(results);
       moreEl.classList.remove('hidden');
+      attribution.classList.remove('hidden');
+      fillProviders();
       if (data.source === 'fallback') {
         showToast('The AI is busy, so these are top-rated matches for your filters.', 'info', 4500);
       }

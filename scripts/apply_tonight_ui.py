@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Adds the Tonight and Library screens to the existing dashboard files.
+"""Adds the Tonight and Library screens to the existing dashboard files (wires them into the dashboard).
 
 Run from the repository root:   python3 scripts/apply_tonight_ui.py
 
@@ -65,7 +65,7 @@ TONIGHT_SECTION = '''    <!-- ── SECTION: Tonight ────────�
 
 # ── Library ───────────────────────────────────────────────────────────────────
 LIBRARY_NAV = '''      <button class="nav-item" data-section="library">
-        <span class="nav-icon">📚</span> Library
+        <span class="nav-icon">📚</span> Queues &amp; Diary
       </button>
 '''
 
@@ -138,9 +138,13 @@ def edit_html(html):
     if 'id="section-library"' not in html:
         if '/css/library.css' not in html:
             html = insert_after(html, css_anchor, '  <link rel="stylesheet" href="/css/library.css">\n', 'dashboard.css link')
-        # Library goes right after the Tonight nav item if present, otherwise after Home
+        # Nav: first item of the sidebar's "Library" group (before Watchlist) if there is one,
+        # otherwise after the Tonight item, otherwise after Home.
+        watchlist_nav = re.search(r'^[ \t]*<button class="nav-item" data-section="watchlist">', html, re.M)
         tonight_nav = re.search(r'      <button class="nav-item" data-section="tonight">.*?</button>\n', html, re.S)
-        if tonight_nav:
+        if watchlist_nav:
+            html = html[: watchlist_nav.start()] + LIBRARY_NAV + html[watchlist_nav.start():]
+        elif tonight_nav:
             html = html[: tonight_nav.end()] + LIBRARY_NAV + html[tonight_nav.end():]
         else:
             html = insert_after_home_nav(html, LIBRARY_NAV)

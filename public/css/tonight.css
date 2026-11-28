@@ -72,3 +72,17 @@
 @media (prefers-reduced-motion: reduce) {
   .tonight-seg, .tonight-chip { transition: none; }
 }
+
+/* Where to watch */
+.tonight-country { max-width: 860px; margin: 0 0 var(--space-md, 16px); font-size: 0.875rem; color: var(--text-secondary, #b3b3b3); }
+.tonight-country label { display: inline-flex; align-items: center; gap: 8px; }
+.tonight-country select { width: auto; padding: 6px 10px; }
+.tonight-attrib { max-width: 860px; margin: var(--space-md, 16px) 0 0; }
+.tonight-attrib a { color: inherit; text-decoration: underline; }
+.tonight-card__where { display: flex; flex-direction: column; gap: 6px; font-size: 0.8125rem; }
+.where__group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.where__label { color: var(--text-muted, #8a8a8a); min-width: 5.5em; }
+.where__chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 4px; border-radius: 999px; border: 1px solid var(--border, rgba(255,255,255,.15)); color: var(--text-primary, #fff); }
+.where__logo { width: 18px; height: 18px; border-radius: 4px; object-fit: cover; }
+.where__more, .where__none { color: var(--text-muted, #8a8a8a); }
+.where__link { color: var(--text-secondary, #b3b3b3); text-decoration: underline; width: fit-content; }

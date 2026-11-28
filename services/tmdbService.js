@@ -333,6 +333,39 @@ const tmdbService = {
     return result;
   },
 
+  // ─── Where to watch ────────────────────────────────────────────────────────
+
+  // Streaming availability per country, from TMDB's watch-provider data (provided by JustWatch; the app must show
+  // JustWatch attribution wherever it is displayed). Returns { [COUNTRY]: { link, stream, free, ads, rent, buy } }
+  // where each group is a list of { id, name, logo }.
+  async getWatchProviders(mediaType, id) {
+    const type = mediaType === 'tv' ? 'tv' : 'movie';
+    const cacheKey = `providers:${type}:${id}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+
+    const { data } = await tmdb.get(`/${type}/${id}/watch/providers`);
+    const group = (list) =>
+      (Array.isArray(list) ? list : [])
+        .slice(0, 12)
+        .map((p) => ({ id: p.provider_id, name: p.provider_name, logo: posterUrl(p.logo_path, 'w92') }))
+        .filter((p) => p.name);
+
+    const result = {};
+    for (const [country, info] of Object.entries(data.results || {})) {
+      result[country] = {
+        link: info.link || null,
+        stream: group(info.flatrate),
+        free: group(info.free),
+        ads: group(info.ads),
+        rent: group(info.rent),
+        buy: group(info.buy),
+      };
+    }
+    cache.set(cacheKey, result, 6 * 60 * 60 * 1000); // availability changes slowly: 6 hours
+    return result;
+  },
+
   // Test hook (not used by the app)
   _setHttpForTests(fake) {
     tmdb = fake || realClient;

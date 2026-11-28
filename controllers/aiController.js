@@ -4,6 +4,10 @@ const tmdbService = require('../services/tmdbService');
 const tonightService = require('../services/tonightService');
 const { HttpError, cleanText, cleanList, toInt } = require('../utils/validate');
 
+function getClientIp(req) {
+  return req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 'unknown';
+}
+
 // Merge AI suggestions with TMDB data (aligned by index, so no fuzzy title matching)
 async function enrichRecommendations(aiRecs) {
   const items = aiRecs

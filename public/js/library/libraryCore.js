@@ -172,13 +172,14 @@ export function setFavorite(lib, ref, value, now = new Date()) {
 }
 
 // Current rating for a title; changes are kept in a short history (for "taste evolution" later)
-export function rateTitle(lib, ref, tenths, now = new Date()) {
+// reason: 'manual' (user changed rating directly) | 'diary-edit' (rating updated via diary entry edit) | 'log-viewing' (rating set when logging a viewing)
+export function rateTitle(lib, ref, tenths, { now = new Date(), reason = 'manual' } = {}) {
   const item = lib.items[ref];
   if (!item) throw new LibraryError('Title is not in your library');
   const value = tenths === null ? null : validTenths(tenths);
   if (tenths !== null && value === null) throw new LibraryError('Rating must be between 0.1 and 10');
   if (item.rating === value) return lib;
-  const history = [...item.ratingHistory, { rating: value, at: iso(now) }].slice(-LIMITS.history);
+  const history = [...item.ratingHistory, { rating: value, at: iso(now), reason }].slice(-LIMITS.history);
   return patchItem(lib, ref, { rating: value, ratingHistory: history }, now);
 }
 
@@ -208,7 +209,7 @@ export function logViewing(lib, rawTitle, entry = {}, { now = new Date(), idFn =
   const status = info.mediaType === 'movie' ? 'watched' : item.status === 'watched' ? 'watched' : 'watching';
   next = patchItem(next, info.ref, { status }, now);
   next = removeFromQueue(next, info.ref, now);
-  if (rating !== null) next = rateTitle(next, info.ref, rating, now);
+  if (rating !== null) next = rateTitle(next, info.ref, rating, { now, reason: 'log-viewing' });
 
   const record = {
     id: clean(idFn(), 40),
@@ -221,6 +222,29 @@ export function logViewing(lib, rawTitle, entry = {}, { now = new Date(), idFn =
     createdAt: iso(now),
   };
   return { lib: { ...next, diary: [...next.diary, record] }, entry: record };
+}
+
+// Edit a diary entry (only the fields given change). If it is the latest entry for its title and the rating changed,
+// the title's current rating follows it.
+export function updateDiaryEntry(lib, id, changes = {}, { now = new Date() } = {}) {
+  const current = lib.diary.find((e) => e.id === id);
+  if (!current) throw new LibraryError('Diary entry not found');
+  const has = (key) => Object.prototype.hasOwnProperty.call(changes, key);
+  const record = {
+    ...current,
+    watchedOn: normalizeDate(changes.watchedOn || current.watchedOn, now),
+    rating: has('rating') ? toTenths(changes.rating) : current.rating,
+    review: has('review') ? cleanMultiline(changes.review, LIMITS.review) : current.review,
+    rewatch: has('rewatch') ? Boolean(changes.rewatch) : current.rewatch,
+    extras: has('extras') ? cleanExtras({ ...current.extras, ...changes.extras }) : current.extras,
+  };
+  let next = { ...lib, diary: lib.diary.map((e) => (e.id === id ? record : e)) };
+  const sameTitle = next.diary.filter((e) => e.ref === record.ref);
+  const latest = sameTitle.reduce((a, b) => (b.watchedOn > a.watchedOn || (b.watchedOn === a.watchedOn && b.createdAt > a.createdAt) ? b : a));
+  if (latest.id === id && record.rating !== current.rating && next.items[record.ref]) {
+    next = rateTitle(next, record.ref, record.rating, { now, reason: 'diary-edit' });
+  }
+  return next;
 }
 
 export const deleteDiaryEntry = (lib, id) => ({ ...lib, diary: lib.diary.filter((e) => e.id !== id) });
@@ -325,7 +349,10 @@ export function toggleEpisode(lib, rawTitle, season, episode, watched, { seasons
   let [next] = ensureItem(lib, info, now);
   const show = mergeCounts(showOf(next, info.ref), seasons);
   const current = show.seasons[season] || { count: null, watched: [] };
-  if (current.count !== null && episode > current.count) throw new LibraryError('That season has fewer episodes');
+  // Validate against known episode count; if unknown, enforce a reasonable absolute ceiling
+  // to prevent direct API calls from marking absurd episode numbers (e.g., episode 999 for a 10-ep season)
+  const maxKnown = current.count ?? LIMITS.episodes;
+  if (episode > maxKnown) throw new LibraryError('That season has fewer episodes');
   const list = watched ? sortedUnique([...current.watched, episode]) : current.watched.filter((e) => e !== episode);
   next = { ...next, episodes: { ...next.episodes, [info.ref]: { seasons: { ...show.seasons, [season]: { count: current.count, watched: list } } } } };
   return reconcileShow(next, info.ref, now);
@@ -343,7 +370,9 @@ export function markUpTo(lib, rawTitle, season, episode, { seasons, now = new Da
     if (key < season && s.count !== null) out.seasons[key] = { count: s.count, watched: Array.from({ length: s.count }, (_, i) => i + 1) };
   }
   const here = out.seasons[season] || { count: null, watched: [] };
-  if (here.count !== null && episode > here.count) throw new LibraryError('That season has fewer episodes');
+  // Validate against known episode count; if unknown, enforce a reasonable absolute ceiling
+  const maxKnown = here.count ?? LIMITS.episodes;
+  if (episode > maxKnown) throw new LibraryError('That season has fewer episodes');
   out.seasons[season] = { count: here.count, watched: sortedUnique([...here.watched, ...Array.from({ length: episode }, (_, i) => i + 1)]) };
   next = { ...next, episodes: { ...next.episodes, [info.ref]: out } };
   return reconcileShow(next, info.ref, now);
@@ -415,7 +444,7 @@ export function parseImport(text) {
       const info = sanitizeTitle(raw);
       if (info.ref !== ref) throw new LibraryError('ref mismatch');
       const history = (Array.isArray(raw.ratingHistory) ? raw.ratingHistory : [])
-        .map((h) => ({ rating: h?.rating === null ? null : validTenths(h?.rating), at: validIso(h?.at) }))
+        .map((h) => ({ rating: h?.rating === null ? null : validTenths(h?.rating), at: validIso(h?.at), reason: typeof h?.reason === 'string' ? h.reason : 'manual' }))
         .filter((h) => h.at)
         .slice(-LIMITS.history);
       lib.items[ref] = {
